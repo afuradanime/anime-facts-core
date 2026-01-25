@@ -74,6 +74,74 @@ __declspec(dllexport) season_t current_season() {
     };
 }
 
+__declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data) {
+    
+    if (!data) return 1;
+
+    sqlite3* connection = NULL;
+
+    if (sqlite3_open(DB_PATH, &connection) != SQLITE_OK) {
+        fprintf(stderr, "Failed to open database\n");
+        return 1;
+    }
+
+    sqlite3_stmt* stmt;
+    int prep_rc = sqlite3_prepare_v2(connection, SQL(
+        SELECT a.id, a.sources, a.title, a.type, a.episodes, a.status, a.picture, a.thumbnail, a.duration_value, s.year, s.season
+        FROM anime a
+        INNER JOIN anime_season s ON a.id = s.anime_id
+        WHERE a.id = ?
+    ), -1, &stmt, 0);
+
+    if (prep_rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
+        sqlite3_close(connection);
+        return 1;
+    }
+
+    int bind_rc1 = sqlite3_bind_int(stmt, 1, id);
+    if (bind_rc1 != SQLITE_OK) {
+        fprintf(stderr, "Failed to bind id rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        sqlite3_close(connection);
+        return 1;
+    }
+
+    int step_rc = sqlite3_step(stmt);
+    if (step_rc != SQLITE_ROW) {
+        fprintf(stderr, "No anime found with id %u\n", id);
+        sqlite3_finalize(stmt);
+        sqlite3_close(connection);
+        return 1;  // Not found / error
+    }
+
+    make_anime_simple(
+        data, 
+        sqlite3_column_int(stmt, 0), 
+        (const char*) sqlite3_column_text(stmt, 1), 
+        (const char*) sqlite3_column_text(stmt, 2), 
+        sqlite3_column_int(stmt, 3), 
+        sqlite3_column_int(stmt, 4), 
+        sqlite3_column_int(stmt, 5), 
+        (const char*) sqlite3_column_text(stmt, 6), 
+        (const char*) sqlite3_column_text(stmt, 7)
+    );
+    
+    if (sqlite3_column_type(stmt, 8) != SQLITE_NULL) 
+        set_anime_duration(data, sqlite3_column_double(stmt, 8));
+    
+    set_anime_season(
+        data,
+        sqlite3_column_int(stmt, 9),
+        sqlite3_column_int(stmt, 10)
+    );
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(connection);
+
+    return 0;
+}
+
 __declspec(dllexport) int fetch_anime_this_season(size_t* n, anime_t** data) {
     
     sqlite3* connection = NULL;
@@ -81,7 +149,7 @@ __declspec(dllexport) int fetch_anime_this_season(size_t* n, anime_t** data) {
     *data = NULL;
 
     if (sqlite3_open(DB_PATH, &connection) != SQLITE_OK) {
-        printf("Failed to open database\n");
+        fprintf(stderr, "Failed to open database\n");
         return 1;
     }
     
@@ -95,7 +163,7 @@ __declspec(dllexport) int fetch_anime_this_season(size_t* n, anime_t** data) {
     ), -1, &stmt, 0);
 
     if (prep_rc != SQLITE_OK) {
-        printf("Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
+        fprintf(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
         sqlite3_close(connection);
         return 1;
     }
@@ -104,7 +172,7 @@ __declspec(dllexport) int fetch_anime_this_season(size_t* n, anime_t** data) {
 
     int bind_rc1 = sqlite3_bind_int(stmt, 1, cur_season.year);
     if (bind_rc1 != SQLITE_OK) {
-        printf("Failed to bind year rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
+        fprintf(stderr, "Failed to bind year rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
         sqlite3_finalize(stmt);
         sqlite3_close(connection);
         return 1;
@@ -112,7 +180,7 @@ __declspec(dllexport) int fetch_anime_this_season(size_t* n, anime_t** data) {
 
     int bind_rc2 = sqlite3_bind_text(stmt, 2, season_names[cur_season.season], -1, NULL);
     if (bind_rc2 != SQLITE_OK) {
-        printf("Failed to bind season rc:%d errMsg %s\n", bind_rc2, sqlite3_errmsg(connection));
+        fprintf(stderr, "Failed to bind season rc:%d errMsg %s\n", bind_rc2, sqlite3_errmsg(connection));
         sqlite3_finalize(stmt);
         sqlite3_close(connection);
         return 1;
@@ -133,7 +201,7 @@ __declspec(dllexport) int fetch_anime_this_season(size_t* n, anime_t** data) {
     if (count > 0) {
         *data = (anime_t*) calloc(count, sizeof(anime_t));
         if (*data == NULL) {
-            printf("Memory allocation failed\n");
+            fprintf(stderr, "Memory allocation failed\n");
             sqlite3_finalize(stmt);
             sqlite3_close(connection);
             return 1;
@@ -158,13 +226,14 @@ __declspec(dllexport) int fetch_anime_this_season(size_t* n, anime_t** data) {
             (const char*) sqlite3_column_text(stmt, 7)
         );
         
-        if (sqlite3_column_type(stmt, 8) != SQLITE_NULL) {
-            anime->duration_value = malloc(sizeof(float));
-            *anime->duration_value = sqlite3_column_double(stmt, 8);
-        }
+        if (sqlite3_column_type(stmt, 8) != SQLITE_NULL) 
+            set_anime_duration(anime, sqlite3_column_double(stmt, 8));
         
-        anime->season.year = sqlite3_column_int(stmt, 9);
-        anime->season.season = sqlite3_column_int(stmt, 10);
+        set_anime_season(
+            anime,
+            sqlite3_column_int(stmt, 9),
+            sqlite3_column_int(stmt, 10)
+        );
         
         i++;
     }
@@ -181,16 +250,23 @@ int main(void) {
 
     printf("Hello, world!\n\n");
 
-    anime_t* data = NULL;
-    size_t n = 0;
+    // anime_t* data = NULL;
+    // size_t n = 0;
     
-    if (fetch_anime_this_season(&n, &data) == 0 && n > 0) {
+    // if (fetch_anime_this_season(&n, &data) == 0 && n > 0) {
 
-        for(size_t i = 0; i < n; i++)
-            printf("[%d] %s\n", data[i].id, data[i].title);
+    //     for(size_t i = 0; i < n; i++)
+    //         printf("[%d] %s\n", data[i].id, data[i].title);
 
-        free_anime_array(data, n);
+    //     free_anime_array(data, n);
+    // }
+
+    anime_t a;
+    if (fetch_anime_by_id(25032, &a) == 0) {
+
+        printf("[%d] %s\n", a.id, a.title);
+
+        free_anime(&a);
     }
-
     return 0;
 }

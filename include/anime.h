@@ -2,6 +2,7 @@
 #define ANIME_H
 
 #include "dynamic_array.h"
+#include <string.h>
 
 typedef struct season {
     enum meteorological_season {
@@ -75,5 +76,16 @@ void make_anime_simple(
     const char* picture, 
     const char* thumbnail
 );
+
+/**
+ * @brief Set anime duration value
+ */
+void set_anime_duration(anime_t* anime, float duration_minutes);
+
+/**
+ * @brief Set anime season
+ */
+void set_anime_season(anime_t* anime, unsigned char season, unsigned short year);
+
 
 #endif
