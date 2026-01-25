@@ -146,23 +146,17 @@ __declspec(dllexport) int fetch_anime_this_season(size_t* n, anime_t** data) {
 
         anime_t* anime = &(*data)[i];
         
-        anime->id = sqlite3_column_int(stmt, 0);
-        
-        const char* sources = (const char*)sqlite3_column_text(stmt, 1);
-        anime->sources = sources ? strdup(sources) : NULL;
-        
-        const char* title = (const char*)sqlite3_column_text(stmt, 2);
-        anime->title = title ? strdup(title) : NULL;
-        
-        anime->type = sqlite3_column_int(stmt, 3);
-        anime->episodes = sqlite3_column_int(stmt, 4);
-        anime->status = sqlite3_column_int(stmt, 5);
-        
-        const char* picture = (const char*)sqlite3_column_text(stmt, 6);
-        anime->picture = picture ? strdup(picture) : NULL;
-        
-        const char* thumbnail = (const char*)sqlite3_column_text(stmt, 7);
-        anime->thumbnail = thumbnail ? strdup(thumbnail) : NULL;
+        make_anime_simple(
+            anime, 
+            sqlite3_column_int(stmt, 0), 
+            (const char*) sqlite3_column_text(stmt, 1), 
+            (const char*) sqlite3_column_text(stmt, 2), 
+            sqlite3_column_int(stmt, 3), 
+            sqlite3_column_int(stmt, 4), 
+            sqlite3_column_int(stmt, 5), 
+            (const char*) sqlite3_column_text(stmt, 6), 
+            (const char*) sqlite3_column_text(stmt, 7)
+        );
         
         if (sqlite3_column_type(stmt, 8) != SQLITE_NULL) {
             anime->duration_value = malloc(sizeof(float));
@@ -171,19 +165,6 @@ __declspec(dllexport) int fetch_anime_this_season(size_t* n, anime_t** data) {
         
         anime->season.year = sqlite3_column_int(stmt, 9);
         anime->season.season = sqlite3_column_int(stmt, 10);
-        
-        // Initialize other data as null
-        // We probably wont need all of this in full everytime, and it's taking a long time,
-        // So we should maybe offer to query the "unimportant" info seperatly
-        anime->descriptions[0] = NULL;
-        anime->descriptions[1] = NULL;
-
-        init_string_array(&anime->synonyms);
-        init_string_array(&anime->related_anime);
-
-        init_tag_array(&anime->tags);
-        init_producer_array(&anime->producers);
-        init_studio_array(&anime->studios);
         
         i++;
     }

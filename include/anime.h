@@ -61,4 +61,19 @@ struct anime {
 
 typedef struct anime anime_t;
 
+/**
+ * @brief Make an anime from it base data, without querying for anything else
+ */
+void make_anime_simple(
+    anime_t* anime,
+    unsigned int id, 
+    const char* sources, 
+    const char* title, 
+    unsigned char type, 
+    unsigned int episodes, 
+    unsigned char status, 
+    const char* picture, 
+    const char* thumbnail
+);
+
 #endif
