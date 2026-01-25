@@ -3,6 +3,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "anime.h"
 #include "sqlite3/sqlite3.h"
 
 #include "anime_facts_api.h"
@@ -13,17 +14,36 @@
 
 char* season_names[5] =  {"SPRING", "SUMMER", "FALL", "WINTER", "UNDEFINED"};
 
-__declspec(dllexport) void free_anime(anime_t data) {
-    if (data.sources) free(data.sources);
-    if (data.title) free(data.title);
-    if (data.picture) free(data.picture);
-    if (data.thumbnail) free(data.thumbnail);
-    if (data.duration_value) free(data.duration_value);
+__declspec(dllexport) void free_anime(anime_t* anime) {
+    if (!anime) return;
+    
+    if (anime->sources) free(anime->sources);
+    if (anime->title) free(anime->title);
+    if (anime->picture) free(anime->picture);
+    if (anime->thumbnail) free(anime->thumbnail);
+    if (anime->duration_value) free(anime->duration_value);
+    
+    // Free descriptions
+    for (int i = 0; i < 2; i++) {
+        if (anime->descriptions[i]) {
+            if (anime->descriptions[i]->description) {
+                free(anime->descriptions[i]->description);
+            }
+            free(anime->descriptions[i]);
+        }
+    }
+    
+    // Free dynamic arrays
+    free_string_array(&anime->synonyms);
+    free_string_array(&anime->related_anime);
+    free_tag_array(&anime->tags);
+    free_producer_array(&anime->producers);
+    free_studio_array(&anime->studios);
 }
 
 __declspec(dllexport) void free_anime_array(anime_t* data, size_t n) {
     
-    for (size_t i = 0; i < n; i++) free_anime(data[i]);
+    for (size_t i = 0; i < n; i++) free_anime(&data[i]);
     free(data);
 }
 
@@ -66,11 +86,11 @@ __declspec(dllexport) int fetch_anime_this_season(size_t* n, anime_t** data) {
     
     sqlite3_stmt* stmt;
     int prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT a.id, a.sources, a.title, a.type, a.episodes, a.status, a.picture, a.thumbnail, a.duration_value
+        SELECT a.id, a.sources, a.title, a.type, a.episodes, a.status, a.picture, a.thumbnail, a.duration_value, s.year, s.season
         FROM anime a
-        INNER JOIN anime_season a_season ON a.id = a_season.anime_id
-        WHERE a_season.year = ? AND a_season.season = ?
-        ORDER BY a.title;
+        INNER JOIN anime_season s ON a.id = s.anime_id
+        WHERE s.year = ? AND s.season = ?
+        ORDER BY a.title
     ), -1, &stmt, 0);
 
     if (prep_rc != SQLITE_OK) {
@@ -123,29 +143,46 @@ __declspec(dllexport) int fetch_anime_this_season(size_t* n, anime_t** data) {
     size_t i = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW && i < count) {
 
-        (*data)[i].id = sqlite3_column_int(stmt, 0);
+        anime_t* anime = &(*data)[i];
         
-        const char* sources = (const char*) sqlite3_column_text(stmt, 1);
-        (*data)[i].sources = sources ? strdup(sources) : NULL;
+        anime->id = sqlite3_column_int(stmt, 0);
         
-        const char* title = (const char*) sqlite3_column_text(stmt, 2);
-        (*data)[i].title = title ? strdup(title) : NULL;
+        const char* sources = (const char*)sqlite3_column_text(stmt, 1);
+        anime->sources = sources ? strdup(sources) : NULL;
         
-        (*data)[i].type = sqlite3_column_int(stmt, 3);
-        (*data)[i].episodes = sqlite3_column_int(stmt, 4);
-        (*data)[i].status = sqlite3_column_int(stmt, 5);
+        const char* title = (const char*)sqlite3_column_text(stmt, 2);
+        anime->title = title ? strdup(title) : NULL;
         
-        const char* picture = (const char*) sqlite3_column_text(stmt, 6);
-        (*data)[i].picture = picture ? strdup(picture) : NULL;
+        anime->type = sqlite3_column_int(stmt, 3);
+        anime->episodes = sqlite3_column_int(stmt, 4);
+        anime->status = sqlite3_column_int(stmt, 5);
         
-        const char* thumbnail = (const char*) sqlite3_column_text(stmt, 7);
-        (*data)[i].thumbnail = thumbnail ? strdup(thumbnail) : NULL;
+        const char* picture = (const char*)sqlite3_column_text(stmt, 6);
+        anime->picture = picture ? strdup(picture) : NULL;
         
-        (*data)[i].duration_value = NULL;
+        const char* thumbnail = (const char*)sqlite3_column_text(stmt, 7);
+        anime->thumbnail = thumbnail ? strdup(thumbnail) : NULL;
+        
         if (sqlite3_column_type(stmt, 8) != SQLITE_NULL) {
-            (*data)[i].duration_value = (float*) malloc(sizeof(float));
-            *(*data)[i].duration_value = sqlite3_column_double(stmt, 8);
+            anime->duration_value = malloc(sizeof(float));
+            *anime->duration_value = sqlite3_column_double(stmt, 8);
         }
+        
+        anime->season.year = sqlite3_column_int(stmt, 9);
+        anime->season.season = sqlite3_column_int(stmt, 10);
+        
+        // Initialize other data as null
+        // We probably wont need all of this in full everytime, and it's taking a long time,
+        // So we should maybe offer to query the "unimportant" info seperatly
+        anime->descriptions[0] = NULL;
+        anime->descriptions[1] = NULL;
+        
+        init_string_array(&anime->synonyms);
+        init_string_array(&anime->related_anime);
+
+        init_tag_array(&anime->tags);
+        init_producer_array(&anime->producers);
+        init_studio_array(&anime->studios);
         
         i++;
     }
