@@ -4,17 +4,28 @@ CFLAGS_64 = -Wall -O2
 TARGET = anime_facts.exe
 TARGET_LIB = anime_facts.dll
 
-all: main build
+# Source files
+SRC_DIR = src
+SRCS = main.c $(SRC_DIR)/dynamic_array.c
 
-main:
+# Object files
+OBJS = main.o $(SRC_DIR)/dynamic_array.o sqlite3/sqlite3.o
+
+all: build
+
+main.o: main.c include/anime.h include/anime_facts_api.h include/dynamic_array.h
 	$(CC) $(CFLAGS) -c main.c -o main.o
 
-# Build everything
-build: main
-	$(CC) -o $(TARGET) main.o sqlite3/sqlite3.o
+$(SRC_DIR)/dynamic_array.o: $(SRC_DIR)/dynamic_array.c include/dynamic_array.h include/anime.h
+	$(CC) $(CFLAGS) -c $(SRC_DIR)/dynamic_array.c -o $(SRC_DIR)/dynamic_array.o
 
-build_lib: main
-	$(CC) -shared -o $(TARGET_LIB) -Wl,--out-implib,libtstdll.a main.o sqlite3/sqlite3.o
+# Build executable
+build: $(OBJS)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)
+
+# Build DLL
+build_lib: $(OBJS)
+	$(CC) -shared -o $(TARGET_LIB) -Wl,--out-implib,$(IMPORT_LIB) $(OBJS)
 
 run: build
 	./$(TARGET)
@@ -24,7 +35,9 @@ sqlite:
 	$(CC) $(CFLAGS) $(SQLITE_CFLAGS) -c sqlite3/sqlite3.c -o sqlite3/sqlite3.o
 
 clean:
-	del /Q main.o 2>nul || true
-	del /Q $(TARGET) $(TARGET_LIB) libtstdll.a 2>nul || true
+		del /Q main.o 2>nul || true
+	del /Q $(SRC_DIR)\\dynamic_array.o 2>nul || true
+	del /Q $(TARGET) $(TARGET_LIB) $(IMPORT_LIB) 2>nul || true
+	@echo Cleaned build artifacts
 
 .PHONY: sqlite main link build build_lib run clean

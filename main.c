@@ -3,10 +3,11 @@
 #include <string.h>
 #include <time.h>
 
-#include "anime.h"
-#include "sqlite3/sqlite3.h"
+#include "include/anime.h"
+#include "include/anime_facts_api.h"
+#include "include/dynamic_array.h"
 
-#include "anime_facts_api.h"
+#include "sqlite3/sqlite3.h"
 
 #define SQL(...) #__VA_ARGS__
 
@@ -130,7 +131,7 @@ __declspec(dllexport) int fetch_anime_this_season(size_t* n, anime_t** data) {
 
     // Allocate array
     if (count > 0) {
-        *data = (anime_t*) malloc(count * sizeof(anime_t));
+        *data = (anime_t*) calloc(count, sizeof(anime_t));
         if (*data == NULL) {
             printf("Memory allocation failed\n");
             sqlite3_finalize(stmt);
@@ -176,7 +177,7 @@ __declspec(dllexport) int fetch_anime_this_season(size_t* n, anime_t** data) {
         // So we should maybe offer to query the "unimportant" info seperatly
         anime->descriptions[0] = NULL;
         anime->descriptions[1] = NULL;
-        
+
         init_string_array(&anime->synonyms);
         init_string_array(&anime->related_anime);
 
