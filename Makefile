@@ -1,4 +1,4 @@
-CC = D:\\mingw64\\bin\\gcc.exe
+CC = gcc
 CFLAGS = -Wall -O2
 CFLAGS_64 = -Wall -O2
 TARGET = anime_facts.exe
