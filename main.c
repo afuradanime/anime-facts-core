@@ -4,6 +4,7 @@
 #include <time.h>
 
 #include "include/anime.h"
+#include "include/pageable.h"
 #include "include/anime_facts_api.h"
 #include "include/dynamic_array.h"
 
@@ -74,6 +75,114 @@ __declspec(dllexport) season_t current_season() {
     };
 }
 
+__declspec(dllexport) int fetch_anime_from_query(const char* name, pageable_t page, unsigned int* n, anime_t** data) {
+
+    sqlite3* connection = NULL;
+    *n = 0;
+    *data = NULL;
+
+    if (sqlite3_open(DB_PATH, &connection) != SQLITE_OK) {
+        fprintf(stderr, "Failed to open database\n");
+        return 1;
+    }
+    
+    sqlite3_stmt* stmt;
+    int prep_rc = sqlite3_prepare_v2(connection, SQL(
+        SELECT a.id, a.sources, a.title, a.type, a.episodes, a.status, a.picture, a.thumbnail, a.duration_value
+        FROM anime a
+        WHERE a.title LIKE ?
+        ORDER BY a.title
+        LIMIT ? OFFSET ?
+    ), -1, &stmt, 0);
+
+    if (prep_rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
+        sqlite3_close(connection);
+        return 1;
+    }
+
+    char pattern[512];
+    snprintf(pattern, sizeof(pattern), "%%%s%%", name);
+
+    int bind_rc1 = sqlite3_bind_text(stmt, 1, pattern, -1, NULL);
+    if (bind_rc1 != SQLITE_OK) {
+        fprintf(stderr, "Failed to bind name filter rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        sqlite3_close(connection);
+        return 1;
+    }
+
+    int bind_rc2 = sqlite3_bind_int(stmt, 2, page.page_size);
+    if (bind_rc2 != SQLITE_OK) {
+        fprintf(stderr, "Failed to bind page size filter rc:%d errMsg %s\n", bind_rc2, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        sqlite3_close(connection);
+        return 1;
+    }
+
+    int bind_rc3 = sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
+    if (bind_rc3 != SQLITE_OK) {
+        fprintf(stderr, "Failed to bind page number filter rc:%d errMsg %s\n", bind_rc3, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        sqlite3_close(connection);
+        return 1;
+    }
+
+    // count results
+    size_t count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        count++;
+    }
+
+    // Reset statement to beginning
+    sqlite3_reset(stmt);
+    sqlite3_bind_text(stmt, 1, pattern, -1, NULL);
+    sqlite3_bind_int(stmt, 2, page.page_size);
+    sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
+
+    // Allocate array
+    if (count > 0) {
+        *data = (anime_t*) calloc(count, sizeof(anime_t));
+        if (*data == NULL) {
+            fprintf(stderr, "Memory allocation failed\n");
+            sqlite3_finalize(stmt);
+            sqlite3_close(connection);
+            return 1;
+        }
+    }
+
+    // populate array
+    size_t i = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW && i < count) {
+
+        anime_t* anime = &(*data)[i];
+        
+        make_anime_simple(
+            anime, 
+            sqlite3_column_int(stmt, 0), 
+            (const char*) sqlite3_column_text(stmt, 1), 
+            (const char*) sqlite3_column_text(stmt, 2), 
+            sqlite3_column_int(stmt, 3), 
+            sqlite3_column_int(stmt, 4), 
+            sqlite3_column_int(stmt, 5), 
+            (const char*) sqlite3_column_text(stmt, 6), 
+            (const char*) sqlite3_column_text(stmt, 7)
+        );
+        
+        if (sqlite3_column_type(stmt, 8) != SQLITE_NULL) 
+            set_anime_duration(anime, sqlite3_column_double(stmt, 8));
+        
+        i++;
+    }
+
+    *n = count;
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(connection);
+
+    return 0;
+}
+
 __declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data) {
     
     if (!data) return 1;
@@ -87,9 +196,8 @@ __declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data) {
 
     sqlite3_stmt* stmt;
     int prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT a.id, a.sources, a.title, a.type, a.episodes, a.status, a.picture, a.thumbnail, a.duration_value, s.year, s.season
+        SELECT a.id, a.sources, a.title, a.type, a.episodes, a.status, a.picture, a.thumbnail, a.duration_value
         FROM anime a
-        INNER JOIN anime_season s ON a.id = s.anime_id
         WHERE a.id = ?
     ), -1, &stmt, 0);
 
@@ -129,12 +237,6 @@ __declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data) {
     
     if (sqlite3_column_type(stmt, 8) != SQLITE_NULL) 
         set_anime_duration(data, sqlite3_column_double(stmt, 8));
-    
-    set_anime_season(
-        data,
-        sqlite3_column_int(stmt, 9),
-        sqlite3_column_int(stmt, 10)
-    );
 
     sqlite3_finalize(stmt);
     sqlite3_close(connection);
@@ -142,7 +244,7 @@ __declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data) {
     return 0;
 }
 
-__declspec(dllexport) int fetch_anime_this_season(size_t* n, anime_t** data) {
+__declspec(dllexport) int fetch_anime_this_season(unsigned int* n, anime_t** data) {
     
     sqlite3* connection = NULL;
     *n = 0;
@@ -250,23 +352,26 @@ int main(void) {
 
     printf("Hello, world!\n\n");
 
-    // anime_t* data = NULL;
-    // size_t n = 0;
+    anime_t* data = NULL;
+    unsigned int n = 0;
     
-    // if (fetch_anime_this_season(&n, &data) == 0 && n > 0) {
+    if (fetch_anime_from_query("prisma", (pageable_t) {
+        .page_number = 0,
+        .page_size = 10
+    }, &n, &data) == 0 && n > 0) {
 
-    //     for(size_t i = 0; i < n; i++)
-    //         printf("[%d] %s\n", data[i].id, data[i].title);
+        for(size_t i = 0; i < n; i++)
+            printf("[%d] %s\n", data[i].id, data[i].title);
 
-    //     free_anime_array(data, n);
-    // }
-
-    anime_t a;
-    if (fetch_anime_by_id(25032, &a) == 0) {
-
-        printf("[%d] %s\n", a.id, a.title);
-
-        free_anime(&a);
+        free_anime_array(data, n);
     }
+
+    // anime_t a;
+    // if (fetch_anime_by_id(25032, &a) == 0) {
+
+    //     printf("[%d] %s\n", a.id, a.title);
+
+    //     free_anime(&a);
+    // }
     return 0;
 }
