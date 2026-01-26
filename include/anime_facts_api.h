@@ -13,6 +13,6 @@ __declspec(dllexport) season_t current_season();
 __declspec(dllexport) int fetch_anime_this_season(unsigned int* n, anime_t** data);
 
 __declspec(dllexport) void free_anime(anime_t* data);
-__declspec(dllexport) void free_anime_array(anime_t* data, size_t n);
+__declspec(dllexport) void free_anime_array(anime_t* data, unsigned int n);
 __declspec(dllexport) int fetch_anime_from_query(const char* name, pageable_t page, unsigned int* n, anime_t** data);
 #endif

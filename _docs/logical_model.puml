@@ -1,0 +1,97 @@
+@startuml Anime Database Logical Model
+
+skinparam linetype ortho
+
+' Entities
+entity "anime" as anime {
+  * id : INTEGER <<PK>>
+  --
+  sources : TEXT
+  title : TEXT
+  type : TEXT
+  episodes : REAL
+  status : TEXT
+  picture : TEXT
+  thumbnail : TEXT
+  duration_value : REAL
+  duration_unit : TEXT
+  rating : TEXT
+  color : TEXT
+}
+
+entity "anime_season" as anime_season {
+  * id : INTEGER <<PK>>
+  --
+  * anime_id : INTEGER <<FK>>
+  season : TEXT
+  year : INTEGER
+}
+
+entity "synonyms" as synonyms {
+  * id : INTEGER <<PK>>
+  --
+  * anime_id : INTEGER <<FK>>
+  synonym : TEXT
+}
+
+entity "studios" as studios {
+  * id : INTEGER <<PK>>
+  --
+  * anime_id : INTEGER <<FK>>
+  studio : TEXT
+}
+
+entity "producers" as producers {
+  * id : INTEGER <<PK>>
+  --
+  * anime_id : INTEGER <<FK>>
+  producer : TEXT
+}
+
+entity "related_anime" as related_anime {
+  * id : INTEGER <<PK>>
+  --
+  * anime_id : INTEGER <<FK>>
+  related_url : TEXT
+}
+
+entity "tags" as tags {
+  * id : INTEGER <<PK>>
+  --
+  tag : TEXT <<UNIQUE>>
+}
+
+entity "anime_tags" as anime_tags {
+  * id : INTEGER <<PK>>
+  --
+  * anime_id : INTEGER <<FK>>
+  * tag_id : INTEGER <<FK>>
+}
+
+entity "language" as language {
+  * id : INTEGER <<PK>>
+  --
+  language : TEXT
+}
+
+entity "description" as description {
+  * id : INTEGER <<PK>>
+  --
+  * anime_id : INTEGER <<FK>>
+  description : TEXT
+  * language : INTEGER <<FK>>
+}
+
+' Relationships
+anime ||--o{ anime_season : "has"
+anime ||--o{ synonyms : "has"
+anime ||--o{ studios : "produced by"
+anime ||--o{ producers : "produced by"
+anime ||--o{ related_anime : "related to"
+anime ||--o{ anime_tags : "tagged with"
+anime ||--o{ description : "described in"
+
+tags ||--o{ anime_tags : "applied to"
+language ||--o{ description : "written in"
+
+@enduml

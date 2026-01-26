@@ -43,7 +43,7 @@ __declspec(dllexport) void free_anime(anime_t* anime) {
     free_studio_array(&anime->studios);
 }
 
-__declspec(dllexport) void free_anime_array(anime_t* data, size_t n) {
+__declspec(dllexport) void free_anime_array(anime_t* data, unsigned int n) {
     
     for (size_t i = 0; i < n; i++) free_anime(&data[i]);
     free(data);
