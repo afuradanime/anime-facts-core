@@ -1,302 +1,481 @@
-#!/usr/bin/env python3
-"""
-Import anime-offline-database JSONL into SQLite database.
-"""
-
 import json
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import sys
+from datetime import datetime
+
+# When to consider it a quality anime?
+QUALITY_SCORE: int = 6;
+# What image type to get
+IMAGE_TYPE: str = "webp";
 
 def create_tables(conn: sqlite3.Connection) -> None:
-    """Create SQLite tables based on the schema."""
-
+    """Create SQLite tables based on the new physical schema."""
+    
     cursor = conn.cursor()
-
-    # Drop existing tables
-    cursor.execute("DROP TABLE IF EXISTS anime")
-    cursor.execute("DROP TABLE IF EXISTS anime_season")
+    
+    # Drop existing tables (in correct order due to foreign keys)
+    cursor.execute("DROP TABLE IF EXISTS anime_tags")
+    cursor.execute("DROP TABLE IF EXISTS anime_demographics")
+    cursor.execute("DROP TABLE IF EXISTS anime_themes")
+    cursor.execute("DROP TABLE IF EXISTS anime_explicit_genres")
+    cursor.execute("DROP TABLE IF EXISTS anime_genres")
+    cursor.execute("DROP TABLE IF EXISTS anime_studios")
+    cursor.execute("DROP TABLE IF EXISTS anime_licensors")
+    cursor.execute("DROP TABLE IF EXISTS anime_producers")
     cursor.execute("DROP TABLE IF EXISTS synonyms")
-    cursor.execute("DROP TABLE IF EXISTS studios")
-    cursor.execute("DROP TABLE IF EXISTS producers")
-    cursor.execute("DROP TABLE IF EXISTS related_anime")
     cursor.execute("DROP TABLE IF EXISTS tags")
-    cursor.execute("DROP TABLE IF EXISTS description")
-    cursor.execute("DROP TABLE IF EXISTS language")
-
-    # Main anime table
+    cursor.execute("DROP TABLE IF EXISTS demographics")
+    cursor.execute("DROP TABLE IF EXISTS themes")
+    cursor.execute("DROP TABLE IF EXISTS explicit_genres")
+    cursor.execute("DROP TABLE IF EXISTS genres")
+    cursor.execute("DROP TABLE IF EXISTS studios")
+    cursor.execute("DROP TABLE IF EXISTS licensors")
+    cursor.execute("DROP TABLE IF EXISTS producers")
+    cursor.execute("DROP TABLE IF EXISTS anime")
+    cursor.execute("DROP TABLE IF EXISTS anime_status")
+    cursor.execute("DROP TABLE IF EXISTS anime_type")
+    
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS anime (
+        CREATE TABLE anime_type (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sources TEXT,
+            name TEXT UNIQUE NOT NULL
+        )
+    """)
+    
+    cursor.execute("""
+        INSERT INTO anime_type (name) VALUES 
+            ('TV'), ('OVA'), ('Movie'), ('Special'), ('ONA'), ('Music'), ('Unknown')
+    """)
+    
+    cursor.execute("""
+        CREATE TABLE anime_status (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL
+        )
+    """)
+    
+    cursor.execute("""
+        INSERT INTO anime_status (name) VALUES 
+            ('Finished Airing'), ('Currently Airing'), ('Not yet aired'), ('Unknown')
+    """)
+    
+    cursor.execute("""
+        CREATE TABLE anime (
+            id INTEGER PRIMARY KEY,
+            url TEXT,
             title TEXT NOT NULL,
-            type TEXT NOT NULL,
-            episodes REAL NOT NULL,
-            status TEXT NOT NULL,
-            picture TEXT,
-            thumbnail TEXT,
-            duration_value REAL,
-            duration_unit TEXT,
-            rating TEXT,
-            color TEXT
-        )
-    """)
-    
-    # Anime season table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS anime_season (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            anime_id INTEGER NOT NULL,
-            season TEXT NOT NULL,
+            type_id INTEGER NOT NULL,
+            source TEXT,
+            episodes INTEGER,
+            status_id INTEGER NOT NULL,
+            airing BOOLEAN DEFAULT 0,
+            duration TEXT,
+            quality_score BOOLEAN DEFAULT 0,
+            start_date DATETIME,
+            end_date DATETIME,
+            season TEXT,
             year INTEGER,
-            FOREIGN KEY (anime_id) REFERENCES anime(id)
+            broadcast_day TEXT,
+            broadcast_time TEXT,
+            broadcast_timezone TEXT,
+            image_url TEXT,
+            small_image_url TEXT,
+            large_image_url TEXT,
+            trailer_embed_url TEXT,
+            synopsis TEXT,
+            background TEXT,
+            FOREIGN KEY (type_id) REFERENCES anime_type(id),
+            FOREIGN KEY (status_id) REFERENCES anime_status(id)
         )
     """)
     
-    # Synonyms table
+    cursor.execute("CREATE INDEX idx_anime_year_season ON anime(year, season)")
+    cursor.execute("CREATE INDEX idx_anime_airing ON anime(airing) WHERE airing = 1")
+    cursor.execute("CREATE INDEX idx_anime_type ON anime(type_id)")
+    cursor.execute("CREATE INDEX idx_anime_title ON anime(title COLLATE NOCASE)")
+    
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS synonyms (
+        CREATE TABLE synonyms (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             anime_id INTEGER NOT NULL,
-            synonym TEXT NOT NULL,
-            FOREIGN KEY (anime_id) REFERENCES anime(id)
+            type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE
         )
     """)
     
-    # Studios table
+    cursor.execute("CREATE INDEX idx_synonyms_title ON synonyms(title COLLATE NOCASE)")
+    cursor.execute("CREATE INDEX idx_synonyms_anime_id ON synonyms(anime_id)")
+    
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS studios (
+        CREATE TABLE producers (
+            id INTEGER PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            type TEXT,
+            url TEXT
+        )
+    """)
+    
+    cursor.execute("""
+        CREATE TABLE anime_producers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             anime_id INTEGER NOT NULL,
-            studio TEXT NOT NULL,
-            FOREIGN KEY (anime_id) REFERENCES anime(id)
+            producer_id INTEGER NOT NULL,
+            FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
+            FOREIGN KEY (producer_id) REFERENCES producers(id) ON DELETE CASCADE,
+            UNIQUE(anime_id, producer_id)
         )
     """)
     
-    # Producers table
+    cursor.execute("CREATE INDEX idx_anime_producers_producer_id ON anime_producers(producer_id)")
+    cursor.execute("CREATE INDEX idx_anime_producers_anime_id ON anime_producers(anime_id)")
+    
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS producers (
+        CREATE TABLE licensors (
+            id INTEGER PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            type TEXT,
+            url TEXT
+        )
+    """)
+    
+    cursor.execute("""
+        CREATE TABLE anime_licensors (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             anime_id INTEGER NOT NULL,
-            producer TEXT NOT NULL,
-            FOREIGN KEY (anime_id) REFERENCES anime(id)
+            licensor_id INTEGER NOT NULL,
+            FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
+            FOREIGN KEY (licensor_id) REFERENCES licensors(id) ON DELETE CASCADE,
+            UNIQUE(anime_id, licensor_id)
         )
     """)
     
-    # Related anime table
+    cursor.execute("CREATE INDEX idx_anime_licensors_licensor_id ON anime_licensors(licensor_id)")
+    
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS related_anime (
+        CREATE TABLE studios (
+            id INTEGER PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            type TEXT,
+            url TEXT
+        )
+    """)
+    
+    cursor.execute("""
+        CREATE TABLE anime_studios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             anime_id INTEGER NOT NULL,
-            related_url TEXT NOT NULL,
-            FOREIGN KEY (anime_id) REFERENCES anime(id)
+            studio_id INTEGER NOT NULL,
+            FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
+            FOREIGN KEY (studio_id) REFERENCES studios(id) ON DELETE CASCADE,
+            UNIQUE(anime_id, studio_id)
         )
     """)
     
-    # Tags lookup table
+    cursor.execute("CREATE INDEX idx_anime_studios_studio_id ON anime_studios(studio_id)")
+    cursor.execute("CREATE INDEX idx_anime_studios_anime_id ON anime_studios(anime_id)")
+    
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tags (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tag TEXT NOT NULL UNIQUE
+        CREATE TABLE tags (
+            id INTEGER PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            type TEXT NOT NULL,
+            url TEXT
         )
     """)
     
-    # Anime tags junction table
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS anime_tags (
+        CREATE TABLE anime_tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             anime_id INTEGER NOT NULL,
             tag_id INTEGER NOT NULL,
-            FOREIGN KEY (anime_id) REFERENCES anime(id),
-            FOREIGN KEY (tag_id) REFERENCES tags(id)
+            FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
+            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE,
+            UNIQUE(anime_id, tag_id)
         )
     """)
-
-    # Language table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS language (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            language TEXT NOT NULL
-        )
-    """)
-
-    cursor.execute("""
-        INSERT INTO language (language)
-        VALUES (?)
-    """, ("English",))
-
-    cursor.execute("""
-        INSERT INTO language (language)
-        VALUES (?)
-    """, ("Portuguese",))
-
-    # Description table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS description (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            anime_id INTEGER NOT NULL,
-            description TEXT NOT NULL,
-            language INTEGER NOT NULL,
-            FOREIGN KEY (anime_id) REFERENCES anime(id),
-            FOREIGN KEY (language) REFERENCES language(id)
-        )
-    """)
+    
+    cursor.execute("CREATE INDEX idx_anime_tags_tag_id ON anime_tags(tag_id)")
+    cursor.execute("CREATE INDEX idx_anime_tags_anime_id ON anime_tags(anime_id)")
+    cursor.execute("CREATE INDEX idx_tags_type_name ON tags(type, name)")
     
     conn.commit()
+    print("Database schema created")
 
 
-def insert_anime(conn: sqlite3.Connection, anime_data: Dict[str, Any]) -> int:
-    """Insert anime record and return the anime_id."""
+def get_or_create_type_id(cursor: sqlite3.Cursor, type_name: str) -> int:
+    """Get type_id from anime_type table."""
+    cursor.execute("SELECT id FROM anime_type WHERE name = ?", (type_name,))
+    result = cursor.fetchone()
+    return result[0] if result else 7  # Default to 'UNKNOWN' if not found
+
+
+def get_or_create_status_id(cursor: sqlite3.Cursor, status_name: str) -> int:
+    """Get status_id from anime_status table."""
+    cursor.execute("SELECT id FROM anime_status WHERE name = ?", (status_name,))
+    result = cursor.fetchone()
+    return result[0] if result else 4  # Default to 'UNKNOWN' if not found
+
+
+def insert_or_get_entity(cursor: sqlite3.Cursor, table: str, 
+                         entity_data: Dict[str, Any]) -> int:
+    """Insert or get existing entity (producer, licensor, studio, tag)."""
+    mal_id = entity_data.get('mal_id')
+    name = entity_data.get('name')
+    entity_type = entity_data.get('type')
+    url = entity_data.get('url')
+    
+    if not mal_id or not name:
+        return None
+    
+    # Try to get existing entity by MAL ID
+    cursor.execute(f"SELECT id FROM {table} WHERE id = ?", (mal_id,))
+    result = cursor.fetchone()
+    
+    if result:
+        return result[0]
+    
+    # Insert new entity
+    cursor.execute(f"""
+        INSERT INTO {table} (id, name, type, url)
+        VALUES (?, ?, ?, ?)
+    """, (mal_id, name, entity_type, url))
+    
+    return mal_id
+
+
+def insert_anime(conn: sqlite3.Connection, anime_data: Dict[str, Any]) -> Optional[int]:
+    """Insert anime record and all related data."""
     cursor = conn.cursor()
     
-    # Prepare main anime fields
-    sources = json.dumps(anime_data.get("sources", []))
-    title = anime_data.get("title")
-    anime_type = anime_data.get("type")
-    episodes = anime_data.get("episodes", 0)
-    status = anime_data.get("status")
-    picture = anime_data.get("picture")
-    thumbnail = anime_data.get("thumbnail")
-    
-    # Optional duration
-    duration_value = None
-    duration_unit = None
-    if "duration" in anime_data and anime_data["duration"]:
-        duration_value = anime_data["duration"].get("value")
-        duration_unit = anime_data["duration"].get("unit")
-    
-    # Optional rating and color
-    rating = anime_data.get("rating")
-    color = anime_data.get("color")
-    
-    cursor.execute("""
-        INSERT INTO anime 
-        (sources, title, type, episodes, status, picture, thumbnail, 
-         duration_value, duration_unit, rating, color)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (sources, title, anime_type, episodes, status, picture, thumbnail,
-          duration_value, duration_unit, rating, color))
-    
-    return cursor.lastrowid
+    try:
+        # Extract basic info
+        mal_id = anime_data.get('id')
+        if not mal_id:
+            print(f"Warning: Skipping anime without mal_id", file=sys.stderr)
+            return None
+        
+        url = anime_data.get('url')
+        title = anime_data.get('title')
+        source = anime_data.get('source')
+        
+        # Type and status (convert to IDs)
+        anime_type = anime_data.get('type')
+        type_id = get_or_create_type_id(cursor, anime_type)
+        
+        status = anime_data.get('status')
+        status_id = get_or_create_status_id(cursor, status)
+        
+        # Episodes and airing
+        episodes = anime_data.get('episodes')
+        airing = 1 if anime_data.get('airing', False) else 0
+        duration = anime_data.get('duration')
+        
+        # Quality score flag
+        score = anime_data.get('score')
+        quality_score = 1 if score and score > QUALITY_SCORE else 0
+        
+        # Dates
+        start_date = anime_data.get('start_date')
+        end_date = anime_data.get('end_date')
+        season = anime_data.get('season')
+        year = anime_data.get('year')
+        
+        # Broadcast
+        broadcast_day = anime_data.get('broadcast_day')
+        broadcast_time = anime_data.get('broadcast_time')
+        broadcast_timezone = anime_data.get('broadcast_timezone')
+        
+        # Images
+        image_url = anime_data.get('image_url')
+        small_image_url = anime_data.get('small_image_url')
+        large_image_url = anime_data.get('large_image_url')
+        
+        # Trailer
+        trailer_embed_url = anime_data.get('trailer_embed_url')
+        
+        # Text content
+        synopsis = anime_data.get('synopsis')
+        background = anime_data.get('background')
+        
+        # Insert main anime record
+        cursor.execute("""
+            INSERT OR REPLACE INTO anime 
+            (id, url, title, type_id, source, episodes, status_id, airing, 
+             duration, quality_score, start_date, end_date, season, year,
+             broadcast_day, broadcast_time, broadcast_timezone,
+             image_url, small_image_url, large_image_url,
+             trailer_embed_url,
+             synopsis, background)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (mal_id, url, title, type_id, source, episodes, status_id, airing,
+              duration, quality_score, start_date, end_date, season, year,
+              broadcast_day, broadcast_time, broadcast_timezone,
+              image_url, small_image_url, large_image_url,
+              trailer_embed_url,
+              synopsis, background))
+        
+        titles = anime_data.get('titles', [])
+        for title_entry in titles:
+            title_type = title_entry.get('type')
+            title_text = title_entry.get('title')
+            if title_text and title_type != "Default":
+                cursor.execute("""
+                    INSERT INTO synonyms (anime_id, type, title)
+                    VALUES (?, ?, ?)
+                """, (mal_id, title_type, title_text))
+
+        title_synonyms = anime_data.get('title_synonyms', [])
+        existing_titles = {t.get('title') for t in titles if t.get('title')}
+        for synonym in title_synonyms:
+            if synonym and synonym not in existing_titles:
+                cursor.execute("""
+                    INSERT INTO synonyms (anime_id, type, title)
+                    VALUES (?, ?, ?)
+                """, (mal_id, 'Synonym', synonym))
+        
+        # Insert producers
+        producers = anime_data.get('producers', [])
+        for producer in producers:
+            producer_id = insert_or_get_entity(cursor, 'producers', producer)
+            if producer_id:
+                cursor.execute("""
+                    INSERT OR IGNORE INTO anime_producers (anime_id, producer_id)
+                    VALUES (?, ?)
+                """, (mal_id, producer_id))
+        
+        # Insert licensors
+        licensors = anime_data.get('licensors', [])
+        for licensor in licensors:
+            licensor_id = insert_or_get_entity(cursor, 'licensors', licensor)
+            if licensor_id:
+                cursor.execute("""
+                    INSERT OR IGNORE INTO anime_licensors (anime_id, licensor_id)
+                    VALUES (?, ?)
+                """, (mal_id, licensor_id))
+        
+        # Insert studios
+        studios = anime_data.get('studios', [])
+        for studio in studios:
+            studio_id = insert_or_get_entity(cursor, 'studios', studio)
+            if studio_id:
+                cursor.execute("""
+                    INSERT OR IGNORE INTO anime_studios (anime_id, studio_id)
+                    VALUES (?, ?)
+                """, (mal_id, studio_id))
+        
+        # Insert tags (genres, themes, demographics, explicit_genres)
+        tag_types = [
+            ('genres', 'genre'),
+            ('themes', 'theme'),
+            ('demographics', 'demographic'),
+            ('explicit_genres', 'explicit_genre')
+        ]
+        
+        for field_name, tag_type in tag_types:
+            tags = anime_data.get(field_name, [])
+            for tag in tags:
+                tag_id = insert_or_get_entity(cursor, 'tags', {
+                    'mal_id': tag.get('mal_id'),
+                    'name': tag.get('name'),
+                    'type': tag_type,
+                    'url': tag.get('url')
+                })
+                if tag_id:
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO anime_tags (anime_id, tag_id)
+                        VALUES (?, ?)
+                    """, (mal_id, tag_id))
+        
+        return mal_id
+        
+    except Exception as e:
+        print(f"Error inserting anime {anime_data.get('mal_id')}: {e}", file=sys.stderr)
+        return None
 
 
-def insert_anime_season(conn: sqlite3.Connection, anime_id: int, 
-                       anime_season: Dict[str, Any]) -> None:
-    """Insert anime season record."""
-    cursor = conn.cursor()
-    
-    season = anime_season.get("season", "UNDEFINED")
-    year = anime_season.get("year")
-    
-    cursor.execute("""
-        INSERT INTO anime_season (anime_id, season, year)
-        VALUES (?, ?, ?)
-    """, (anime_id, season, year))
-
-
-def insert_array_data(conn: sqlite3.Connection, anime_id: int, 
-                     table_name: str, column_name: str, 
-                     values: List[str]) -> None:
-    """Insert array data into a separate table."""
-    cursor = conn.cursor()
-    
-    # Special handling for tags (use lookup table)
-    if table_name == "tags":
-        for tag in values:
-            # Insert or ignore if tag already exists
-            cursor.execute("INSERT OR IGNORE INTO tags (tag) VALUES (?)", (tag,))
-            # Get the tag id
-            cursor.execute("SELECT id FROM tags WHERE tag = ?", (tag,))
-            tag_id = cursor.fetchone()[0]
-            
-            # Insert into junction table
-            cursor.execute("""
-                INSERT INTO anime_tags (anime_id, tag_id)
-                VALUES (?, ?)
-            """, (anime_id, tag_id))
-    else:
-        for value in values:
-            cursor.execute(f"""
-                INSERT INTO {table_name} (anime_id, {column_name})
-                VALUES (?, ?)
-            """, (anime_id, value))
-
-
-def import_jsonl_to_sqlite(jsonl_path: Path, db_path: Path, 
-                          skip_first: bool = True) -> None:
-    """Import JSONL data into SQLite database."""
+def import_json_to_sqlite(json_path: Path, db_path: Path) -> None:
+    """Import JSON data into SQLite database."""
     
     conn = sqlite3.connect(str(db_path))
+    conn.execute("PRAGMA foreign_keys = ON")
+    
     create_tables(conn)
     
     total_records = 0
     error_count = 0
     
     try:
-        with open(jsonl_path, 'r', encoding='utf-8') as f:
-            for line_num, line in enumerate(f, 1):
-                # Skip first line if it contains metadata
-                if line_num == 1 and skip_first:
-                    try:
-                        meta = json.loads(line)
-                        if "metadata" in meta or "version" in meta:
-                            print(f"Skipping metadata line: {meta}")
+        print(f"\nReading from: {json_path}")
+        
+        with open(json_path, 'r', encoding='utf-8') as f:
+            # Handle both JSONL (line by line) and JSON array formats
+            first_char = f.read(1)
+            f.seek(0)
+            
+            if first_char == '[':
+                # JSON array format
+                data = json.load(f)
+                anime_list = data if isinstance(data, list) else [data]
+            else:
+                # JSONL format
+                anime_list = []
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            anime_list.append(json.loads(line))
+                        except json.JSONDecodeError:
                             continue
-                    except json.JSONDecodeError:
-                        pass
-                
-                try:
-                    anime_data = json.loads(line.strip())
-                    
-                    # Insert main anime record
-                    anime_id = insert_anime(conn, anime_data)
-                    
-                    # Insert anime season
-                    if "animeSeason" in anime_data:
-                        insert_anime_season(conn, anime_id, anime_data["animeSeason"])
-                    
-                    # Insert array fields
-                    if "synonyms" in anime_data:
-                        insert_array_data(conn, anime_id, "synonyms", "synonym", 
-                                        anime_data["synonyms"])
-                    
-                    if "studios" in anime_data:
-                        insert_array_data(conn, anime_id, "studios", "studio", 
-                                        anime_data["studios"])
-                    
-                    if "producers" in anime_data:
-                        insert_array_data(conn, anime_id, "producers", "producer", 
-                                        anime_data["producers"])
-                    
-                    if "relatedAnime" in anime_data:
-                        insert_array_data(conn, anime_id, "related_anime", "related_url", 
-                                        anime_data["relatedAnime"])
-                    
-                    if "tags" in anime_data:
-                        insert_array_data(conn, anime_id, "tags", "tag", 
-                                        anime_data["tags"])
-                    
+        
+        print(f"Found {len(anime_list)} anime records to import\n")
+        
+        for anime_data in anime_list:
+            try:
+                anime_id = insert_anime(conn, anime_data)
+                if anime_id:
                     total_records += 1
                     
-                    if total_records % 100 == 0:
+                    if total_records % 1000 == 0:
                         print(f"Processed {total_records} records...")
                         conn.commit()
-                
-                except json.JSONDecodeError as e:
+                else:
                     error_count += 1
-                    print(f"Error parsing line {line_num}: {e}", file=sys.stderr)
-                except Exception as e:
-                    error_count += 1
-                    print(f"Error processing line {line_num}: {e}", file=sys.stderr)
+                    
+            except Exception as e:
+                error_count += 1
+                print(f"Error processing anime: {e}", file=sys.stderr)
         
         conn.commit()
-        print(f"\n✓ Import complete!")
-        print(f"  Total records inserted: {total_records}")
-        print(f"  Errors encountered: {error_count}")
+        
+        # Print statistics
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM anime")
+        anime_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM studios")
+        studio_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM tags")
+        tag_count = cursor.fetchone()[0]
+        
+        print(f"\n{'='*50}")
+        print(f"✓ Import complete!")
+        print(f"{'='*50}")
+        print(f"  Anime imported:          {total_records}")
+        print(f"  Errors encountered:      {error_count}")
+        print(f"  Total anime in DB:       {anime_count}")
+        print(f"  Unique studios:          {studio_count}")
+        print(f"  Unique tags:             {tag_count}")
+        print(f"{'='*50}\n")
         
     except FileNotFoundError:
-        print(f"Error: JSONL file not found: {jsonl_path}", file=sys.stderr)
+        print(f"Error: JSON file not found: {json_path}", file=sys.stderr)
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"Error: Invalid JSON format: {e}", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
         print(f"Fatal error: {e}", file=sys.stderr)
@@ -311,34 +490,31 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(
-        description="Import anime-offline-database JSONL into SQLite"
+        description="Import MyAnimeList API data into SQLite using new physical model"
     )
     parser.add_argument(
         "--input",
         type=Path,
-        default=Path(__file__).parent / "anime-offline-database.jsonl",
-        help="Path to JSONL input file (default: anime-offline-database.jsonl in script directory)"
+        required=True,
+        help="Path to JSON/JSONL input file"
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path(__file__).parent / "anime.db",
-        help="Path to SQLite database file (default: anime.db in script directory)"
-    )
-    parser.add_argument(
-        "--skip-first",
-        action="store_true",
-        default=True,
-        help="Skip first line if it contains metadata (default: True)"
+        default=Path("anime.db"),
+        help="Path to SQLite database file (default: anime.db)"
     )
     
     args = parser.parse_args()
     
+    print(f"\n{'='*50}")
+    print(f"Anime Database Import Tool")
+    print(f"{'='*50}")
     print(f"Input file:  {args.input}")
     print(f"Output DB:   {args.output}")
-    print(f"Skip first line: {args.skip_first}\n")
+    print(f"{'='*50}\n")
     
-    import_jsonl_to_sqlite(args.input, args.output, args.skip_first)
+    import_json_to_sqlite(args.input, args.output)
 
 
 if __name__ == "__main__":

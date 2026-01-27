@@ -1,78 +1,117 @@
-DROP TABLE IF EXISTS anime_tags;
-DROP TABLE IF EXISTS description;
-DROP TABLE IF EXISTS related_anime;
-DROP TABLE IF EXISTS producers;
-DROP TABLE IF EXISTS studios;
-DROP TABLE IF EXISTS synonyms;
-DROP TABLE IF EXISTS anime_season;
-DROP TABLE IF EXISTS tags;
-DROP TABLE IF EXISTS language;
-DROP TABLE IF EXISTS anime;
+CREATE TABLE anime_type (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL
+);
 
--- Anime table
+INSERT INTO anime_type (name) VALUES 
+    ('TV'),
+    ('OVA'),
+    ('MOVIE'),
+    ('Special'),
+    ('ONA'),
+    ('MUSIC');
+
+CREATE TABLE anime_status (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL
+);
+
+INSERT INTO anime_status (name) VALUES 
+    ('Finished Airing'),
+    ('Currently Airing'),
+    ('Not yet aired');
+
 CREATE TABLE anime (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    sources TEXT,
+    id INTEGER PRIMARY KEY,  -- MAL ID
+    url TEXT,
     title TEXT NOT NULL,
-    type TEXT NOT NULL,
-    episodes REAL NOT NULL,
-    status TEXT NOT NULL,
-    picture TEXT,
-    thumbnail TEXT,
-    duration_value REAL,
-    duration_unit TEXT,
-    rating TEXT,
-    color TEXT
-);
-
--- Anime season table
-CREATE TABLE anime_season (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    anime_id INTEGER NOT NULL,
-    season TEXT NOT NULL,
+    type_id INTEGER NOT NULL,
+    source TEXT,
+    episodes INTEGER,
+    status_id INTEGER NOT NULL,
+    airing BOOLEAN DEFAULT 0,
+    duration TEXT,
+    quality_score BOOLEAN DEFAULT 0,
+    start_date DATETIME,
+    end_date DATETIME,
+    season TEXT,
     year INTEGER,
-    FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE
+    broadcast_day TEXT,
+    broadcast_time TEXT,
+    broadcast_timezone TEXT,
+    image_url TEXT,
+    small_image_url TEXT,
+    large_image_url TEXT,
+    trailer_embed_url TEXT,
+    synopsis TEXT,
+    background TEXT,
+    
+    FOREIGN KEY (type_id) REFERENCES anime_type(id),
+    FOREIGN KEY (status_id) REFERENCES anime_status(id)
 );
 
--- Synonyms table
 CREATE TABLE synonyms (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     anime_id INTEGER NOT NULL,
-    synonym TEXT NOT NULL,
+    type TEXT NOT NULL,  -- 'Default', 'Japanese', 'English', 'Synonym'
+    title TEXT NOT NULL,
     FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE
 );
 
--- Studios table
-CREATE TABLE studios (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    anime_id INTEGER NOT NULL,
-    studio TEXT NOT NULL,
-    FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE
-);
-
--- Producers table
 CREATE TABLE producers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    anime_id INTEGER NOT NULL,
-    producer TEXT NOT NULL,
-    FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE
+    id INTEGER PRIMARY KEY,  -- MAL ID
+    name TEXT UNIQUE NOT NULL,
+    type TEXT,
+    url TEXT
 );
 
--- Related anime table
-CREATE TABLE related_anime (
+CREATE TABLE anime_producers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     anime_id INTEGER NOT NULL,
-    related_url TEXT NOT NULL,
-    FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE
+    producer_id INTEGER NOT NULL,
+    FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
+    FOREIGN KEY (producer_id) REFERENCES producers(id) ON DELETE CASCADE,
+    UNIQUE(anime_id, producer_id)
 );
 
--- Tags lookup table
+CREATE TABLE licensors (
+    id INTEGER PRIMARY KEY,  -- MAL ID
+    name TEXT UNIQUE NOT NULL,
+    type TEXT,
+    url TEXT
+);
+
+CREATE TABLE anime_licensors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    anime_id INTEGER NOT NULL,
+    licensor_id INTEGER NOT NULL,
+    FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
+    FOREIGN KEY (licensor_id) REFERENCES licensors(id) ON DELETE CASCADE,
+    UNIQUE(anime_id, licensor_id)
+);
+
+CREATE TABLE studios (
+    id INTEGER PRIMARY KEY,  -- MAL ID
+    name TEXT UNIQUE NOT NULL,
+    url TEXT
+);
+
+CREATE TABLE anime_studios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    anime_id INTEGER NOT NULL,
+    studio_id INTEGER NOT NULL,
+    FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
+    FOREIGN KEY (studio_id) REFERENCES studios(id) ON DELETE CASCADE,
+    UNIQUE(anime_id, studio_id)
+);
+
 CREATE TABLE tags (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tag TEXT NOT NULL UNIQUE
+    id INTEGER PRIMARY KEY,  -- MAL ID
+    name TEXT UNIQUE NOT NULL,
+    type TEXT NOT NULL,  -- 'genre', 'theme', 'demographic', 'explicit_genre'
+    url TEXT
 );
 
--- Anime tags auxiliary table
 CREATE TABLE anime_tags (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     anime_id INTEGER NOT NULL,
@@ -82,45 +121,20 @@ CREATE TABLE anime_tags (
     UNIQUE(anime_id, tag_id)
 );
 
--- Language table
-CREATE TABLE language (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    language TEXT NOT NULL UNIQUE
-);
-
--- Description table
--- Descriptions can be user inserted in out current model
--- Since we don't have description data for all animes, we allow users to insert them
-CREATE TABLE description (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    anime_id INTEGER NOT NULL,
-    description TEXT NOT NULL,
-    language INTEGER NOT NULL,
-    FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
-    FOREIGN KEY (language) REFERENCES language(id) ON DELETE RESTRICT
-);
-
--- Title search index
-CREATE INDEX idx_anime_title ON anime(title);
-
--- Foreign key indexes for JOIN performance
-CREATE INDEX idx_anime_season_anime_id ON anime_season(anime_id);
+-- Index for filtering by anime season
+CREATE INDEX idx_anime_year_season ON anime(year, season);
+-- Index for filtering currently airing anime
+CREATE INDEX idx_anime_airing ON anime(airing) WHERE airing = 1;
+-- Index for title searching
+CREATE INDEX idx_anime_title ON anime(title COLLATE NOCASE);
+-- Index for looking up anime by any title variant
+CREATE INDEX idx_synonyms_title ON synonyms(title COLLATE NOCASE);
 CREATE INDEX idx_synonyms_anime_id ON synonyms(anime_id);
-CREATE INDEX idx_studios_anime_id ON studios(anime_id);
-CREATE INDEX idx_producers_anime_id ON producers(anime_id);
-CREATE INDEX idx_related_anime_anime_id ON related_anime(anime_id);
-CREATE INDEX idx_anime_tags_anime_id ON anime_tags(anime_id);
+-- Index for finding anime by genre
 CREATE INDEX idx_anime_tags_tag_id ON anime_tags(tag_id);
-CREATE INDEX idx_description_anime_id ON description(anime_id);
-CREATE INDEX idx_description_language ON description(language);
-
--- Filter search indexes
-CREATE INDEX idx_anime_type ON anime(type);
-CREATE INDEX idx_anime_status ON anime(status);
-CREATE INDEX idx_anime_season_year ON anime_season(year);
-CREATE INDEX idx_tags_tag ON tags(tag);
-
--- Bootstrap
-
-INSERT INTO language (language) VALUES ('English');
-INSERT INTO language (language) VALUES ('Portuguese');
+-- Index for getting all tags of an anime
+CREATE INDEX idx_anime_tags_anime_id ON anime_tags(anime_id);
+CREATE INDEX idx_tags_type_name ON tags(type, name);
+-- Index for finding all anime by a studio
+CREATE INDEX idx_anime_studios_studio_id ON anime_studios(studio_id);
+CREATE INDEX idx_anime_studios_anime_id ON anime_studios(anime_id);

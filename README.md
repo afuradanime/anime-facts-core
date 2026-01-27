@@ -14,9 +14,9 @@ Para fazer build do projecto é preciso primeiro compilar o [código fonte do SQ
 make sqlite
 ```
 
-[1] Nota: Esta compilação só é precisa ser feita uma vez.
+[1] Nota: Esta compilação só é preciso ser feita uma vez.
 
-Dada a existència do `sqlite.o` o programa está pronto para ser _built_ como biblioteca partilhada. Para tal existe também um outro _target_:
+Dada a existência do `sqlite.o` o programa está pronto para ser _built_ como biblioteca partilhada. Para tal existe também um outro _target_:
 ```bash
 make build_lib
 ```
@@ -45,3 +45,7 @@ gcc main.c -L. -l anime_facts
 ```
 
 Para a lista completa de cada função e as suas assinaturas, consultar a [documentação completa da API](_docs/complete_docs.md).
+
+## Como formar a base de dados
+A base de dados consiste inteiramente de informação open source. Para criar a base de dados bla bla bla
+TODO

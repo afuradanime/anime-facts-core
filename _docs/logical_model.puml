@@ -1,97 +1,142 @@
-@startuml Anime Database Logical Model
-
+@startuml Anime Database Logical Model (Comprehensive)
 skinparam linetype ortho
+skinparam defaultFontSize 9
 
-' Entities
 entity "anime" as anime {
-  * id : INTEGER <<PK>>
-  --
-  sources : TEXT
-  title : TEXT
-  type : TEXT
-  episodes : REAL
-  status : TEXT
-  picture : TEXT
-  thumbnail : TEXT
-  duration_value : REAL
-  duration_unit : TEXT
-  rating : TEXT
-  color : TEXT
+    * id : INTEGER <<PK>> (mal_id)
+    --
+    **Base info**
+    url : TEXT
+    title : TEXT
+    type : INTEGER «FK»
+    source : TEXT
+    --
+    **Episodes & Status**
+    episodes : INTEGER
+    status : INTEGER «FK»
+    airing : BOOLEAN
+    duration : TEXT
+    quality_score : BOOLEAN 
+    --
+    **Dates**
+    start_date : DATETIME
+    end_date : DATETIME
+    season : TEXT
+    year : INTEGER
+    --
+    **Broadcast**
+    broadcast_day : TEXT
+    broadcast_time : TEXT
+    broadcast_timezone : TEXT
+    --
+    **Images**
+    image_url : TEXT
+    small_image_url : TEXT
+    large_image_url : TEXT
+    --
+    **Trailer**
+    trailer_embed_url : TEXT
+    --
+    **Text Content**
+    synopsis : TEXT
+    background : TEXT
 }
 
-entity "anime_season" as anime_season {
-  * id : INTEGER <<PK>>
-  --
-  * anime_id : INTEGER <<FK>>
-  season : TEXT
-  year : INTEGER
-}
-
-entity "synonyms" as synonyms {
-  * id : INTEGER <<PK>>
-  --
-  * anime_id : INTEGER <<FK>>
-  synonym : TEXT
-}
-
-entity "studios" as studios {
-  * id : INTEGER <<PK>>
-  --
-  * anime_id : INTEGER <<FK>>
-  studio : TEXT
+entity "synonyms" as titles {
+    * id : INTEGER <<PK>>
+    --
+    * anime_id : INTEGER <<FK>>
+    type : TEXT
+    title : TEXT
 }
 
 entity "producers" as producers {
-  * id : INTEGER <<PK>>
-  --
-  * anime_id : INTEGER <<FK>>
-  producer : TEXT
+    * id : INTEGER <<PK>> (mal_id)
+    --
+    name : TEXT <<UNIQUE>>
+    url : TEXT
 }
 
-entity "related_anime" as related_anime {
-  * id : INTEGER <<PK>>
-  --
-  * anime_id : INTEGER <<FK>>
-  related_url : TEXT
+entity "anime_producers" as anime_producers {
+    * id : INTEGER <<PK>>
+    --
+    * anime_id : INTEGER <<FK>>
+    * producer_id : INTEGER <<FK>>
+}
+
+entity "licensors" as licensors {
+    * id : INTEGER <<PK>> (mal_id)
+    --
+    name : TEXT <<UNIQUE>>
+    url : TEXT
+}
+
+entity "anime_licensors" as anime_licensors {
+    * id : INTEGER <<PK>>
+    --
+    * anime_id : INTEGER <<FK>>
+    * licensor_id : INTEGER <<FK>>
+}
+
+entity "studios" as studios {
+    * id : INTEGER <<PK>> (mal_id)
+    --
+    name : TEXT <<UNIQUE>>
+    url : TEXT
+}
+
+entity "anime_studios" as anime_studios {
+    * id : INTEGER <<PK>>
+    --
+    * anime_id : INTEGER <<FK>>
+    * studio_id : INTEGER <<FK>>
 }
 
 entity "tags" as tags {
-  * id : INTEGER <<PK>>
-  --
-  tag : TEXT <<UNIQUE>>
+    * id : INTEGER <<PK>> (mal_id)
+    --
+    name : TEXT <<UNIQUE>>
+    url : TEXT
 }
 
 entity "anime_tags" as anime_tags {
-  * id : INTEGER <<PK>>
-  --
-  * anime_id : INTEGER <<FK>>
-  * tag_id : INTEGER <<FK>>
+    * id : INTEGER <<PK>>
+    --
+    * anime_id : INTEGER <<FK>>
+    * tag_id : INTEGER <<FK>>
 }
 
-entity "language" as language {
-  * id : INTEGER <<PK>>
-  --
-  language : TEXT
+enum "anime_type" as type {
+    + TV
+    + OVA
+    + Movie
+    + Special
+    + ONA
+    + Music
+    + Unknown
 }
 
-entity "description" as description {
-  * id : INTEGER <<PK>>
-  --
-  * anime_id : INTEGER <<FK>>
-  description : TEXT
-  * language : INTEGER <<FK>>
+enum "anime_status" as status {
+    + Finished Airing
+    + Currently Airing
+    + Not yet aired
+    + Unknown
 }
 
-' Relationships
-anime ||--o{ anime_season : "has"
-anime ||--o{ synonyms : "has"
-anime ||--o{ studios : "produced by"
-anime ||--o{ producers : "produced by"
-anime ||--o{ related_anime : "related to"
-anime ||--o{ anime_tags : "tagged with"
-anime ||--o{ description : "described in"
+anime "1"--"*" titles : "has variants"
+anime "1"--"1" type : "has"
+anime "1"--"1" status : "has"
 
-tags ||--o{ anime_tags : "applied to"
-language ||--o{ description : "written in"
+anime "1"--"*" anime_producers : "produced by"
+producers "1"--"*" anime_producers : "produces"
+
+anime "1"--"*" anime_licensors : "licensed by"
+licensors "1"--"*" anime_licensors : "licenses"
+
+anime "1"--"*" anime_studios : "created by"
+studios "1"--"*" anime_studios : "creates"
+
+anime "1"--"*" anime_tags : "classified as"
+tags "1"--"*" anime_tags : "categorizes"
 
 @enduml
