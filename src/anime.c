@@ -1,67 +1,128 @@
 #include "../include/anime.h"
+#include <stdlib.h>
+#include <string.h>
 
-void make_anime_simple(
-    anime_t* anime,
-    unsigned int id, 
-    const char *sources, 
-    const char *title, 
-    unsigned char type, 
-    unsigned int episodes, 
-    unsigned char status, 
-    const char *picture, 
-    const char *thumbnail
+void make_partial_anime(
+    partial_anime_t* anime,
+    unsigned int id,
+    const char* url,
+    const char* title,
+    unsigned char type,
+    const char* source,
+    unsigned int episodes,
+    unsigned char status,
+    bool airing,
+    const char* duration,
+    const char* start_date,
+    const char* end_date,
+    unsigned char season,
+    unsigned short year,
+    const char* broadcast_day,
+    const char* broadcast_time,
+    const char* broadcast_timezone,
+    const char* image_url,
+    const char* small_image_url,
+    const char* large_image_url,
+    const char* trailer_embed_url
 ) {
+    if (!anime) return;
 
     anime->id = id;
-
-    anime->type = type;
-    anime->episodes = episodes;
-    anime->status = status;
-
-    // Always keeping in my mind that these strings may be null
-    anime->picture = picture ? strdup(picture) : NULL;
-    anime->thumbnail = thumbnail ? strdup(thumbnail) : NULL;
-
-    anime->sources = sources ? strdup(sources) : NULL;
+    anime->url = url ? strdup(url) : NULL;
     anime->title = title ? strdup(title) : NULL;
-
-    // Initialize other data as null
-    // We probably wont need all of this in full everytime, and it's taking a long time to fetch,
-    // So we should maybe offer to query the "unimportant" info seperatly
-    anime->descriptions[0] = NULL;
-    anime->descriptions[1] = NULL;
-
-    anime->duration_value = NULL;
-    anime->season = (season_t) {0};
-
-    init_string_array(&anime->synonyms);
-    init_string_array(&anime->related_anime);
-
-    init_tag_array(&anime->tags);
-    init_producer_array(&anime->producers);
-    init_studio_array(&anime->studios);
-}
-
-void set_anime_duration(anime_t* anime, float duration_minutes) {
-    if (!anime) return;
     
-    // Free existing if any, W safety
-    if (anime->duration_value) {
-        free(anime->duration_value);
-        anime->duration_value = NULL;
-    }
+    anime->type = type;
+    anime->status = status;
     
-    if (duration_minutes > 0) {
-        anime->duration_value = (float*) malloc(sizeof(float));
-        if (anime->duration_value) {
-            *anime->duration_value = duration_minutes;
-        }
-    }
-}
-
-void set_anime_season(anime_t* anime, unsigned char season, unsigned short year) {
-    if (!anime) return;
+    anime->source = source ? strdup(source) : NULL;
+    anime->episodes = episodes;
+    
+    anime->airing = airing;
+    anime->duration = duration ? strdup(duration) : NULL;
+    
+    anime->start_date = start_date ? strdup(start_date) : NULL;
+    anime->end_date = end_date ? strdup(end_date) : NULL;
     
     anime->season.season = season;
     anime->season.year = year;
+    
+    anime->broadcast.day = broadcast_day ? strdup(broadcast_day) : NULL;
+    anime->broadcast.time = broadcast_time ? strdup(broadcast_time) : NULL;
+    anime->broadcast.timezone = broadcast_timezone ? strdup(broadcast_timezone) : NULL;
+    
+    anime->image_url = image_url ? strdup(image_url) : NULL;
+    anime->small_image_url = small_image_url ? strdup(small_image_url) : NULL;
+    anime->large_image_url = large_image_url ? strdup(large_image_url) : NULL;
+    
+    anime->trailer_embed_url = trailer_embed_url ? strdup(trailer_embed_url) : NULL;
+}
+
+anime_t map_partial_anime(partial_anime_t* partial) {
+
+    if (!partial) {
+        anime_t empty = {0};
+        return empty;
+    }
+    
+    anime_t anime = {0};
+    
+    // Copy all partial fields
+    anime.id = partial->id;
+    anime.url = partial->url ? strdup(partial->url) : NULL;
+    anime.title = partial->title ? strdup(partial->title) : NULL;
+    anime.type = partial->type;
+    anime.source = partial->source ? strdup(partial->source) : NULL;
+    anime.episodes = partial->episodes;
+    anime.status = partial->status;
+    anime.airing = partial->airing;
+    anime.duration = partial->duration ? strdup(partial->duration) : NULL;
+    anime.start_date = partial->start_date ? strdup(partial->start_date) : NULL;
+    anime.end_date = partial->end_date ? strdup(partial->end_date) : NULL;
+    anime.season = partial->season;
+    anime.broadcast.day = partial->broadcast.day ? strdup(partial->broadcast.day) : NULL;
+    anime.broadcast.time = partial->broadcast.time ? strdup(partial->broadcast.time) : NULL;
+    anime.broadcast.timezone = partial->broadcast.timezone ? strdup(partial->broadcast.timezone) : NULL;
+    anime.image_url = partial->image_url ? strdup(partial->image_url) : NULL;
+    anime.small_image_url = partial->small_image_url ? strdup(partial->small_image_url) : NULL;
+    anime.large_image_url = partial->large_image_url ? strdup(partial->large_image_url) : NULL;
+    anime.trailer_embed_url = partial->trailer_embed_url ? strdup(partial->trailer_embed_url) : NULL;
+    
+    init_string_array(&anime.synonyms);
+    init_description_array(&anime.descriptions);
+    init_tag_array(&anime.tags);
+    init_producer_array(&anime.producers);
+    init_licensor_array(&anime.licensors);
+    init_studio_array(&anime.studios);
+    
+    return anime;
+}
+
+void add_anime_synonym(anime_t* anime, const char* synonym) {
+    if (!anime || !synonym) return;
+    push_string(&anime->synonyms, synonym);
+}
+
+void add_anime_description(anime_t* anime, unsigned char language, const char* description) {
+    if (!anime || !description) return;
+    push_description(&anime->descriptions, language, description);
+}
+
+void add_anime_producer(anime_t* anime, unsigned int id, const char* name, const char* type, const char* url) {
+    if (!anime || !name) return;
+    push_producer(&anime->producers, id, name, type, url);
+}
+
+void add_anime_licensor(anime_t* anime, unsigned int id, const char* name, const char* type, const char* url) {
+    if (!anime || !name) return;
+    push_licensor(&anime->licensors, id, name, type, url);
+}
+
+void add_anime_studio(anime_t* anime, unsigned int id, const char* name, const char* url) {
+    if (!anime || !name) return;
+    push_studio(&anime->studios, id, name, url);
+}
+
+void add_anime_tag(anime_t* anime, unsigned int id, const char* name, unsigned char tag_type, const char* url) {
+    if (!anime || !name) return;
+    push_tag(&anime->tags, id, name, tag_type, url);
 }

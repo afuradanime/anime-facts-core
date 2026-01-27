@@ -14,38 +14,67 @@
 
 #define DB_PATH "../anime.db"
 
-char* season_names[5] =  {"SPRING", "SUMMER", "FALL", "WINTER", "UNDEFINED"};
+char* season_names[5] =  {"spring", "summer", "fall", "winter", "unknown"};
 
 __declspec(dllexport) void free_anime(anime_t* anime) {
     if (!anime) return;
     
-    if (anime->sources) free(anime->sources);
+    // Free strings
+    if (anime->url) free(anime->url);
     if (anime->title) free(anime->title);
-    if (anime->picture) free(anime->picture);
-    if (anime->thumbnail) free(anime->thumbnail);
-    if (anime->duration_value) free(anime->duration_value);
+    if (anime->source) free(anime->source);
+    if (anime->duration) free(anime->duration);
+    if (anime->start_date) free(anime->start_date);
+    if (anime->end_date) free(anime->end_date);
+    if (anime->broadcast.day) free(anime->broadcast.day);
+    if (anime->broadcast.time) free(anime->broadcast.time);
+    if (anime->broadcast.timezone) free(anime->broadcast.timezone);
+    if (anime->image_url) free(anime->image_url);
+    if (anime->small_image_url) free(anime->small_image_url);
+    if (anime->large_image_url) free(anime->large_image_url);
+    if (anime->trailer_embed_url) free(anime->trailer_embed_url);
     
-    // Free descriptions
-    for (int i = 0; i < 2; i++) {
-        if (anime->descriptions[i]) {
-            if (anime->descriptions[i]->description) {
-                free(anime->descriptions[i]->description);
-            }
-            free(anime->descriptions[i]);
-        }
-    }
-    
-    // Free dynamic arrays
+    // Free arrays
     free_string_array(&anime->synonyms);
-    free_string_array(&anime->related_anime);
+    free_description_array(&anime->descriptions);
     free_tag_array(&anime->tags);
     free_producer_array(&anime->producers);
+    free_licensor_array(&anime->licensors);
     free_studio_array(&anime->studios);
+    
+    memset(anime, 0, sizeof(anime_t));
 }
 
 __declspec(dllexport) void free_anime_array(anime_t* data, unsigned int n) {
     
     for (size_t i = 0; i < n; i++) free_anime(&data[i]);
+    free(data);
+}
+
+__declspec(dllexport) void free_partial_anime(partial_anime_t* anime) {
+    if (!anime) return;
+    
+    // Free strings
+    if (anime->url) free(anime->url);
+    if (anime->title) free(anime->title);
+    if (anime->source) free(anime->source);
+    if (anime->duration) free(anime->duration);
+    if (anime->start_date) free(anime->start_date);
+    if (anime->end_date) free(anime->end_date);
+    if (anime->broadcast.day) free(anime->broadcast.day);
+    if (anime->broadcast.time) free(anime->broadcast.time);
+    if (anime->broadcast.timezone) free(anime->broadcast.timezone);
+    if (anime->image_url) free(anime->image_url);
+    if (anime->small_image_url) free(anime->small_image_url);
+    if (anime->large_image_url) free(anime->large_image_url);
+    if (anime->trailer_embed_url) free(anime->trailer_embed_url);
+    
+    memset(anime, 0, sizeof(partial_anime_t));
+}
+
+__declspec(dllexport) void free_partial_anime_array(partial_anime_t* data, unsigned int n) {
+    
+    for (size_t i = 0; i < n; i++) free_partial_anime(&data[i]);
     free(data);
 }
 
@@ -75,7 +104,20 @@ __declspec(dllexport) season_t current_season() {
     };
 }
 
-__declspec(dllexport) int fetch_anime_from_query(const char* name, pageable_t page, unsigned int* n, anime_t** data) {
+static const char* get_text_or_null(sqlite3_stmt* stmt, int col) {
+    return sqlite3_column_type(stmt, col) == SQLITE_NULL ? NULL : (const char*) sqlite3_column_text(stmt, col);
+}
+
+static unsigned char map_season_string(const char* season_str) {
+    if (!season_str) return UNDEFINED;
+    if (strcmp(season_str, "spring") == 0) return SPRING;
+    if (strcmp(season_str, "summer") == 0) return SUMMER;
+    if (strcmp(season_str, "fall") == 0) return FALL;
+    if (strcmp(season_str, "winter") == 0) return WINTER;
+    return UNDEFINED;
+}
+
+__declspec(dllexport) int fetch_anime_from_query(const char* name, pageable_t page, unsigned int* n, partial_anime_t** data) {
 
     sqlite3* connection = NULL;
     *n = 0;
@@ -88,10 +130,10 @@ __declspec(dllexport) int fetch_anime_from_query(const char* name, pageable_t pa
     
     sqlite3_stmt* stmt;
     int prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT a.id, a.sources, a.title, a.type, a.episodes, a.status, a.picture, a.thumbnail, a.duration_value
+        SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url
         FROM anime a
         WHERE a.title LIKE ?
-        ORDER BY a.title
+        ORDER BY a.quality_score DESC, a.title ASC
         LIMIT ? OFFSET ?
     ), -1, &stmt, 0);
 
@@ -142,7 +184,7 @@ __declspec(dllexport) int fetch_anime_from_query(const char* name, pageable_t pa
 
     // Allocate array
     if (count > 0) {
-        *data = (anime_t*) calloc(count, sizeof(anime_t));
+        *data = (partial_anime_t*) calloc(count, sizeof(partial_anime_t));
         if (*data == NULL) {
             fprintf(stderr, "Memory allocation failed\n");
             sqlite3_finalize(stmt);
@@ -155,22 +197,33 @@ __declspec(dllexport) int fetch_anime_from_query(const char* name, pageable_t pa
     size_t i = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW && i < count) {
 
-        anime_t* anime = &(*data)[i];
+        partial_anime_t* anime = &(*data)[i];
         
-        make_anime_simple(
-            anime, 
-            sqlite3_column_int(stmt, 0), 
-            (const char*) sqlite3_column_text(stmt, 1), 
-            (const char*) sqlite3_column_text(stmt, 2), 
-            sqlite3_column_int(stmt, 3), 
-            sqlite3_column_int(stmt, 4), 
-            sqlite3_column_int(stmt, 5), 
-            (const char*) sqlite3_column_text(stmt, 6), 
-            (const char*) sqlite3_column_text(stmt, 7)
+        const char* season_str = get_text_or_null(stmt, 11);
+
+        make_partial_anime(
+            anime,
+            sqlite3_column_int(stmt, 0),
+            get_text_or_null(stmt, 1),
+            get_text_or_null(stmt, 2),
+            (unsigned char)sqlite3_column_int(stmt, 3),
+            get_text_or_null(stmt, 4),
+            sqlite3_column_int(stmt, 5),
+            (unsigned char)sqlite3_column_int(stmt, 6),
+            sqlite3_column_int(stmt, 7) != 0,
+            get_text_or_null(stmt, 8),
+            get_text_or_null(stmt, 9),
+            get_text_or_null(stmt, 10),
+            map_season_string(season_str),
+            (unsigned short)sqlite3_column_int(stmt, 12),
+            get_text_or_null(stmt, 13),
+            get_text_or_null(stmt, 14),
+            get_text_or_null(stmt, 15),
+            get_text_or_null(stmt, 16),
+            get_text_or_null(stmt, 17),
+            get_text_or_null(stmt, 18),
+            get_text_or_null(stmt, 19)
         );
-        
-        if (sqlite3_column_type(stmt, 8) != SQLITE_NULL) 
-            set_anime_duration(anime, sqlite3_column_double(stmt, 8));
         
         i++;
     }
@@ -196,7 +249,7 @@ __declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data) {
 
     sqlite3_stmt* stmt;
     int prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT a.id, a.sources, a.title, a.type, a.episodes, a.status, a.picture, a.thumbnail, a.duration_value
+        SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url
         FROM anime a
         WHERE a.id = ?
     ), -1, &stmt, 0);
@@ -223,20 +276,36 @@ __declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data) {
         return 1;  // Not found / error
     }
 
-    make_anime_simple(
-        data, 
-        sqlite3_column_int(stmt, 0), 
-        (const char*) sqlite3_column_text(stmt, 1), 
-        (const char*) sqlite3_column_text(stmt, 2), 
-        sqlite3_column_int(stmt, 3), 
-        sqlite3_column_int(stmt, 4), 
-        sqlite3_column_int(stmt, 5), 
-        (const char*) sqlite3_column_text(stmt, 6), 
-        (const char*) sqlite3_column_text(stmt, 7)
+    const char* season_str = get_text_or_null(stmt, 11);
+
+    partial_anime_t temp = {0};
+
+    make_partial_anime(
+        &temp,
+        sqlite3_column_int(stmt, 0),
+        get_text_or_null(stmt, 1),
+        get_text_or_null(stmt, 2),
+        (unsigned char)sqlite3_column_int(stmt, 3),
+        get_text_or_null(stmt, 4),
+        sqlite3_column_int(stmt, 5),
+        (unsigned char)sqlite3_column_int(stmt, 6),
+        sqlite3_column_int(stmt, 7) != 0,
+        get_text_or_null(stmt, 8),
+        get_text_or_null(stmt, 9),
+        get_text_or_null(stmt, 10),
+        map_season_string(season_str),
+        (unsigned short)sqlite3_column_int(stmt, 12),
+        get_text_or_null(stmt, 13),
+        get_text_or_null(stmt, 14),
+        get_text_or_null(stmt, 15),
+        get_text_or_null(stmt, 16),
+        get_text_or_null(stmt, 17),
+        get_text_or_null(stmt, 18),
+        get_text_or_null(stmt, 19)
     );
-    
-    if (sqlite3_column_type(stmt, 8) != SQLITE_NULL) 
-        set_anime_duration(data, sqlite3_column_double(stmt, 8));
+
+    // TODO: Get all info here
+    *data = map_partial_anime(&temp);
 
     sqlite3_finalize(stmt);
     sqlite3_close(connection);
@@ -244,7 +313,7 @@ __declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data) {
     return 0;
 }
 
-__declspec(dllexport) int fetch_anime_this_season(unsigned int* n, anime_t** data) {
+__declspec(dllexport) int fetch_anime_this_season(unsigned int* n, partial_anime_t** data) {
     
     sqlite3* connection = NULL;
     *n = 0;
@@ -257,11 +326,9 @@ __declspec(dllexport) int fetch_anime_this_season(unsigned int* n, anime_t** dat
     
     sqlite3_stmt* stmt;
     int prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT a.id, a.sources, a.title, a.type, a.episodes, a.status, a.picture, a.thumbnail, a.duration_value, s.year, s.season
+        SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url
         FROM anime a
-        INNER JOIN anime_season s ON a.id = s.anime_id
-        WHERE s.year = ? AND s.season = ?
-        ORDER BY a.title
+        WHERE a.year = ? AND a.season = ?
     ), -1, &stmt, 0);
 
     if (prep_rc != SQLITE_OK) {
@@ -301,7 +368,7 @@ __declspec(dllexport) int fetch_anime_this_season(unsigned int* n, anime_t** dat
 
     // Allocate array
     if (count > 0) {
-        *data = (anime_t*) calloc(count, sizeof(anime_t));
+        *data = (partial_anime_t*) calloc(count, sizeof(partial_anime_t));
         if (*data == NULL) {
             fprintf(stderr, "Memory allocation failed\n");
             sqlite3_finalize(stmt);
@@ -310,31 +377,35 @@ __declspec(dllexport) int fetch_anime_this_season(unsigned int* n, anime_t** dat
         }
     }
 
-    // populate array
+    // Populate array
     size_t i = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW && i < count) {
+        partial_anime_t* anime = &(*data)[i];
+        
+        const char* season_str = get_text_or_null(stmt, 11);
 
-        anime_t* anime = &(*data)[i];
-        
-        make_anime_simple(
-            anime, 
-            sqlite3_column_int(stmt, 0), 
-            (const char*) sqlite3_column_text(stmt, 1), 
-            (const char*) sqlite3_column_text(stmt, 2), 
-            sqlite3_column_int(stmt, 3), 
-            sqlite3_column_int(stmt, 4), 
-            sqlite3_column_int(stmt, 5), 
-            (const char*) sqlite3_column_text(stmt, 6), 
-            (const char*) sqlite3_column_text(stmt, 7)
-        );
-        
-        if (sqlite3_column_type(stmt, 8) != SQLITE_NULL) 
-            set_anime_duration(anime, sqlite3_column_double(stmt, 8));
-        
-        set_anime_season(
+        make_partial_anime(
             anime,
-            sqlite3_column_int(stmt, 9),
-            sqlite3_column_int(stmt, 10)
+            sqlite3_column_int(stmt, 0),
+            get_text_or_null(stmt, 1),
+            get_text_or_null(stmt, 2),
+            (unsigned char)sqlite3_column_int(stmt, 3),
+            get_text_or_null(stmt, 4),
+            sqlite3_column_int(stmt, 5),
+            (unsigned char)sqlite3_column_int(stmt, 6),
+            sqlite3_column_int(stmt, 7) != 0,
+            get_text_or_null(stmt, 8),
+            get_text_or_null(stmt, 9),
+            get_text_or_null(stmt, 10),
+            map_season_string(season_str),
+            (unsigned short)sqlite3_column_int(stmt, 12),
+            get_text_or_null(stmt, 13),
+            get_text_or_null(stmt, 14),
+            get_text_or_null(stmt, 15),
+            get_text_or_null(stmt, 16),
+            get_text_or_null(stmt, 17),
+            get_text_or_null(stmt, 18),
+            get_text_or_null(stmt, 19)
         );
         
         i++;
@@ -349,29 +420,27 @@ __declspec(dllexport) int fetch_anime_this_season(unsigned int* n, anime_t** dat
 }
 
 int main(void) {
-
     printf("Hello, world!\n\n");
 
-    anime_t* data = NULL;
+    partial_anime_t* data = NULL;
     unsigned int n = 0;
     
-    if (fetch_anime_from_query("prisma", (pageable_t) {
+    if (fetch_anime_from_query("bebop", (pageable_t) {
         .page_number = 0,
-        .page_size = 10
+        .page_size = 25
     }, &n, &data) == 0 && n > 0) {
-
-        for(size_t i = 0; i < n; i++)
+        for(size_t i = 0; i < n; i++) {
             printf("[%d] %s\n", data[i].id, data[i].title);
+        }
 
-        free_anime_array(data, n);
+        free_partial_anime_array(data, n);
     }
 
-    // anime_t a;
-    // if (fetch_anime_by_id(25032, &a) == 0) {
-
+    // partial_anime_t a;
+    // if (fetch_anime_by_id(1, &a) == 0) {
     //     printf("[%d] %s\n", a.id, a.title);
-
-    //     free_anime(&a);
+    //     free_partial_anime(&a);
     // }
+    
     return 0;
 }
