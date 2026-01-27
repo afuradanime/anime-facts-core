@@ -31,6 +31,9 @@ build: $(OBJS)
 build_lib: $(OBJS)
 	$(CC) -shared -o $(TARGET_LIB) -Wl,--out-implib,$(IMPORT_LIB) $(OBJS)
 
+patch: build_lib
+	copy /Y anime_facts.dll ..\backend\drivers\anime_facts.dll
+
 run: build
 	./$(TARGET)
 
