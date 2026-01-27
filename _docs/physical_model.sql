@@ -6,10 +6,10 @@ CREATE TABLE anime_type (
 INSERT INTO anime_type (name) VALUES 
     ('TV'),
     ('OVA'),
-    ('MOVIE'),
+    ('Movie'),
     ('Special'),
     ('ONA'),
-    ('MUSIC');
+    ('Music');
 
 CREATE TABLE anime_status (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -20,6 +20,15 @@ INSERT INTO anime_status (name) VALUES
     ('Finished Airing'),
     ('Currently Airing'),
     ('Not yet aired');
+
+CREATE TABLE language (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL
+);
+
+INSERT INTO language (name) VALUES 
+    ('Portuguese'),
+    ('English');
 
 CREATE TABLE anime (
     id INTEGER PRIMARY KEY,  -- MAL ID
@@ -43,8 +52,6 @@ CREATE TABLE anime (
     small_image_url TEXT,
     large_image_url TEXT,
     trailer_embed_url TEXT,
-    synopsis TEXT,
-    background TEXT,
     
     FOREIGN KEY (type_id) REFERENCES anime_type(id),
     FOREIGN KEY (status_id) REFERENCES anime_status(id)
@@ -58,6 +65,15 @@ CREATE TABLE synonyms (
     FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE
 );
 
+CREATE TABLE anime_descriptions (
+    anime_id INTEGER NOT NULL,
+    language_id INTEGER NOT NULL,
+    description TEXT NOT NULL,
+    PRIMARY KEY (anime_id, language_id),
+    FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
+    FOREIGN KEY (language_id) REFERENCES language(id) ON DELETE CASCADE
+);
+
 CREATE TABLE producers (
     id INTEGER PRIMARY KEY,  -- MAL ID
     name TEXT UNIQUE NOT NULL,
@@ -66,12 +82,11 @@ CREATE TABLE producers (
 );
 
 CREATE TABLE anime_producers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
     anime_id INTEGER NOT NULL,
     producer_id INTEGER NOT NULL,
+    PRIMARY KEY (anime_id, producer_id),
     FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
-    FOREIGN KEY (producer_id) REFERENCES producers(id) ON DELETE CASCADE,
-    UNIQUE(anime_id, producer_id)
+    FOREIGN KEY (producer_id) REFERENCES producers(id) ON DELETE CASCADE
 );
 
 CREATE TABLE licensors (
@@ -82,12 +97,11 @@ CREATE TABLE licensors (
 );
 
 CREATE TABLE anime_licensors (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
     anime_id INTEGER NOT NULL,
     licensor_id INTEGER NOT NULL,
+    PRIMARY KEY (anime_id, licensor_id),
     FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
-    FOREIGN KEY (licensor_id) REFERENCES licensors(id) ON DELETE CASCADE,
-    UNIQUE(anime_id, licensor_id)
+    FOREIGN KEY (licensor_id) REFERENCES licensors(id) ON DELETE CASCADE
 );
 
 CREATE TABLE studios (
@@ -97,12 +111,11 @@ CREATE TABLE studios (
 );
 
 CREATE TABLE anime_studios (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
     anime_id INTEGER NOT NULL,
     studio_id INTEGER NOT NULL,
+    PRIMARY KEY (anime_id, studio_id),
     FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
-    FOREIGN KEY (studio_id) REFERENCES studios(id) ON DELETE CASCADE,
-    UNIQUE(anime_id, studio_id)
+    FOREIGN KEY (studio_id) REFERENCES studios(id) ON DELETE CASCADE
 );
 
 CREATE TABLE tags (
@@ -113,12 +126,11 @@ CREATE TABLE tags (
 );
 
 CREATE TABLE anime_tags (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
     anime_id INTEGER NOT NULL,
     tag_id INTEGER NOT NULL,
+    PRIMARY KEY (anime_id, tag_id),
     FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
-    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE,
-    UNIQUE(anime_id, tag_id)
+    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
 );
 
 -- Index for filtering by anime season
@@ -138,3 +150,6 @@ CREATE INDEX idx_tags_type_name ON tags(type, name);
 -- Index for finding all anime by a studio
 CREATE INDEX idx_anime_studios_studio_id ON anime_studios(studio_id);
 CREATE INDEX idx_anime_studios_anime_id ON anime_studios(anime_id);
+-- Index for getting descriptions by anime_id
+CREATE INDEX idx_anime_descriptions_anime_id ON anime_descriptions(anime_id);
+CREATE INDEX idx_anime_descriptions_language_id ON anime_descriptions(language_id);

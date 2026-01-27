@@ -6,9 +6,9 @@ import sys
 from datetime import datetime
 
 # When to consider it a quality anime?
-QUALITY_SCORE: int = 6;
+QUALITY_SCORE: int = 6
 # What image type to get
-IMAGE_TYPE: str = "webp";
+IMAGE_TYPE: str = "webp"
 
 def create_tables(conn: sqlite3.Connection) -> None:
     """Create SQLite tables based on the new physical schema."""
@@ -17,23 +17,17 @@ def create_tables(conn: sqlite3.Connection) -> None:
     
     # Drop existing tables (in correct order due to foreign keys)
     cursor.execute("DROP TABLE IF EXISTS anime_tags")
-    cursor.execute("DROP TABLE IF EXISTS anime_demographics")
-    cursor.execute("DROP TABLE IF EXISTS anime_themes")
-    cursor.execute("DROP TABLE IF EXISTS anime_explicit_genres")
-    cursor.execute("DROP TABLE IF EXISTS anime_genres")
     cursor.execute("DROP TABLE IF EXISTS anime_studios")
     cursor.execute("DROP TABLE IF EXISTS anime_licensors")
     cursor.execute("DROP TABLE IF EXISTS anime_producers")
+    cursor.execute("DROP TABLE IF EXISTS anime_descriptions")
     cursor.execute("DROP TABLE IF EXISTS synonyms")
     cursor.execute("DROP TABLE IF EXISTS tags")
-    cursor.execute("DROP TABLE IF EXISTS demographics")
-    cursor.execute("DROP TABLE IF EXISTS themes")
-    cursor.execute("DROP TABLE IF EXISTS explicit_genres")
-    cursor.execute("DROP TABLE IF EXISTS genres")
     cursor.execute("DROP TABLE IF EXISTS studios")
     cursor.execute("DROP TABLE IF EXISTS licensors")
     cursor.execute("DROP TABLE IF EXISTS producers")
     cursor.execute("DROP TABLE IF EXISTS anime")
+    cursor.execute("DROP TABLE IF EXISTS language")
     cursor.execute("DROP TABLE IF EXISTS anime_status")
     cursor.execute("DROP TABLE IF EXISTS anime_type")
     
@@ -62,6 +56,18 @@ def create_tables(conn: sqlite3.Connection) -> None:
     """)
     
     cursor.execute("""
+        CREATE TABLE language (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL
+        )
+    """)
+    
+    cursor.execute("""
+        INSERT INTO language (name) VALUES 
+            ('English'), ('Portuguese')
+    """)
+    
+    cursor.execute("""
         CREATE TABLE anime (
             id INTEGER PRIMARY KEY,
             url TEXT,
@@ -84,8 +90,6 @@ def create_tables(conn: sqlite3.Connection) -> None:
             small_image_url TEXT,
             large_image_url TEXT,
             trailer_embed_url TEXT,
-            synopsis TEXT,
-            background TEXT,
             FOREIGN KEY (type_id) REFERENCES anime_type(id),
             FOREIGN KEY (status_id) REFERENCES anime_status(id)
         )
@@ -110,6 +114,17 @@ def create_tables(conn: sqlite3.Connection) -> None:
     cursor.execute("CREATE INDEX idx_synonyms_anime_id ON synonyms(anime_id)")
     
     cursor.execute("""
+        CREATE TABLE anime_descriptions (
+            anime_id INTEGER NOT NULL,
+            language_id INTEGER NOT NULL,
+            description TEXT NOT NULL,
+            PRIMARY KEY (anime_id, language_id),
+            FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
+            FOREIGN KEY (language_id) REFERENCES language(id) ON DELETE CASCADE
+        )
+    """)
+    
+    cursor.execute("""
         CREATE TABLE producers (
             id INTEGER PRIMARY KEY,
             name TEXT UNIQUE NOT NULL,
@@ -120,12 +135,11 @@ def create_tables(conn: sqlite3.Connection) -> None:
     
     cursor.execute("""
         CREATE TABLE anime_producers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
             anime_id INTEGER NOT NULL,
             producer_id INTEGER NOT NULL,
+            PRIMARY KEY (anime_id, producer_id),
             FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
-            FOREIGN KEY (producer_id) REFERENCES producers(id) ON DELETE CASCADE,
-            UNIQUE(anime_id, producer_id)
+            FOREIGN KEY (producer_id) REFERENCES producers(id) ON DELETE CASCADE
         )
     """)
     
@@ -143,12 +157,11 @@ def create_tables(conn: sqlite3.Connection) -> None:
     
     cursor.execute("""
         CREATE TABLE anime_licensors (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
             anime_id INTEGER NOT NULL,
             licensor_id INTEGER NOT NULL,
+            PRIMARY KEY (anime_id, licensor_id),
             FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
-            FOREIGN KEY (licensor_id) REFERENCES licensors(id) ON DELETE CASCADE,
-            UNIQUE(anime_id, licensor_id)
+            FOREIGN KEY (licensor_id) REFERENCES licensors(id) ON DELETE CASCADE
         )
     """)
     
@@ -158,24 +171,25 @@ def create_tables(conn: sqlite3.Connection) -> None:
         CREATE TABLE studios (
             id INTEGER PRIMARY KEY,
             name TEXT UNIQUE NOT NULL,
-            type TEXT,
             url TEXT
         )
     """)
     
     cursor.execute("""
         CREATE TABLE anime_studios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
             anime_id INTEGER NOT NULL,
             studio_id INTEGER NOT NULL,
+            PRIMARY KEY (anime_id, studio_id),
             FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
-            FOREIGN KEY (studio_id) REFERENCES studios(id) ON DELETE CASCADE,
-            UNIQUE(anime_id, studio_id)
+            FOREIGN KEY (studio_id) REFERENCES studios(id) ON DELETE CASCADE
         )
     """)
     
     cursor.execute("CREATE INDEX idx_anime_studios_studio_id ON anime_studios(studio_id)")
     cursor.execute("CREATE INDEX idx_anime_studios_anime_id ON anime_studios(anime_id)")
+
+    cursor.execute("CREATE INDEX idx_anime_descriptions_anime_id ON anime_descriptions(anime_id);")
+    cursor.execute("CREATE INDEX idx_anime_descriptions_language_id ON anime_descriptions(language_id);")
     
     cursor.execute("""
         CREATE TABLE tags (
@@ -188,12 +202,11 @@ def create_tables(conn: sqlite3.Connection) -> None:
     
     cursor.execute("""
         CREATE TABLE anime_tags (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
             anime_id INTEGER NOT NULL,
             tag_id INTEGER NOT NULL,
+            PRIMARY KEY (anime_id, tag_id),
             FOREIGN KEY (anime_id) REFERENCES anime(id) ON DELETE CASCADE,
-            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE,
-            UNIQUE(anime_id, tag_id)
+            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
         )
     """)
     
@@ -207,20 +220,24 @@ def create_tables(conn: sqlite3.Connection) -> None:
 
 def get_or_create_type_id(cursor: sqlite3.Cursor, type_name: str) -> int:
     """Get type_id from anime_type table."""
+    if not type_name:
+        return 7  # Unknown
     cursor.execute("SELECT id FROM anime_type WHERE name = ?", (type_name,))
     result = cursor.fetchone()
-    return result[0] if result else 7  # Default to 'UNKNOWN' if not found
+    return result[0] if result else 7
 
 
 def get_or_create_status_id(cursor: sqlite3.Cursor, status_name: str) -> int:
     """Get status_id from anime_status table."""
+    if not status_name:
+        return 4  # Unknown
     cursor.execute("SELECT id FROM anime_status WHERE name = ?", (status_name,))
     result = cursor.fetchone()
-    return result[0] if result else 4  # Default to 'UNKNOWN' if not found
+    return result[0] if result else 4
 
 
 def insert_or_get_entity(cursor: sqlite3.Cursor, table: str, 
-                         entity_data: Dict[str, Any]) -> int:
+                         entity_data: Dict[str, Any]) -> Optional[int]:
     """Insert or get existing entity (producer, licensor, studio, tag)."""
     mal_id = entity_data.get('mal_id')
     name = entity_data.get('name')
@@ -238,12 +255,23 @@ def insert_or_get_entity(cursor: sqlite3.Cursor, table: str,
         return result[0]
     
     # Insert new entity
-    cursor.execute(f"""
-        INSERT INTO {table} (id, name, type, url)
-        VALUES (?, ?, ?, ?)
-    """, (mal_id, name, entity_type, url))
-    
-    return mal_id
+    try:
+        if table == 'studios':
+            # Studios table doesn't have type field
+            cursor.execute(f"""
+                INSERT INTO {table} (id, name, url)
+                VALUES (?, ?, ?)
+            """, (mal_id, name, url))
+        else:
+            cursor.execute(f"""
+                INSERT INTO {table} (id, name, type, url)
+                VALUES (?, ?, ?, ?)
+            """, (mal_id, name, entity_type, url))
+        return mal_id
+    except sqlite3.IntegrityError:
+        cursor.execute(f"SELECT id FROM {table} WHERE id = ?", (mal_id,))
+        result = cursor.fetchone()
+        return result[0] if result else None
 
 
 def insert_anime(conn: sqlite3.Connection, anime_data: Dict[str, Any]) -> Optional[int]:
@@ -259,6 +287,10 @@ def insert_anime(conn: sqlite3.Connection, anime_data: Dict[str, Any]) -> Option
         
         url = anime_data.get('url')
         title = anime_data.get('title')
+        if not title:
+            print(f"Warning: Skipping anime {mal_id} without title", file=sys.stderr)
+            return None
+            
         source = anime_data.get('source')
         
         # Type and status (convert to IDs)
@@ -289,16 +321,12 @@ def insert_anime(conn: sqlite3.Connection, anime_data: Dict[str, Any]) -> Option
         broadcast_timezone = anime_data.get('broadcast_timezone')
         
         # Images
-        image_url = anime_data.get('image_url')
-        small_image_url = anime_data.get('small_image_url')
-        large_image_url = anime_data.get('large_image_url')
+        image_url = anime_data.get(f'{IMAGE_TYPE}_image_url') or anime_data.get('image_url')
+        small_image_url = anime_data.get(f'{IMAGE_TYPE}_small_image_url') or anime_data.get('small_image_url')
+        large_image_url = anime_data.get(f'{IMAGE_TYPE}_large_image_url') or anime_data.get('large_image_url')
         
         # Trailer
         trailer_embed_url = anime_data.get('trailer_embed_url')
-        
-        # Text content
-        synopsis = anime_data.get('synopsis')
-        background = anime_data.get('background')
         
         # Insert main anime record
         cursor.execute("""
@@ -307,18 +335,42 @@ def insert_anime(conn: sqlite3.Connection, anime_data: Dict[str, Any]) -> Option
              duration, quality_score, start_date, end_date, season, year,
              broadcast_day, broadcast_time, broadcast_timezone,
              image_url, small_image_url, large_image_url,
-             trailer_embed_url,
-             synopsis, background)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             trailer_embed_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (mal_id, url, title, type_id, source, episodes, status_id, airing,
               duration, quality_score, start_date, end_date, season, year,
               broadcast_day, broadcast_time, broadcast_timezone,
               image_url, small_image_url, large_image_url,
-              trailer_embed_url,
-              synopsis, background))
+              trailer_embed_url))
         
+        # Combine synopsis and background for description
+        synopsis = anime_data.get('synopsis', '')
+        background = anime_data.get('background', '')
+        
+        # Build combined description
+        description_parts = []
+        if synopsis:
+            description_parts.append(synopsis)
+        if background:
+            description_parts.append(f"\n\n{background}")
+        
+        combined_description = ''.join(description_parts)
+        
+        # Insert English description (assuming API data is in English)
+        if combined_description:
+            cursor.execute("SELECT id FROM language WHERE name = ?", ('English',))
+            english_id = cursor.fetchone()[0]
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO anime_descriptions (anime_id, language_id, description)
+                VALUES (?, ?, ?)
+            """, (mal_id, english_id, combined_description))
+        
+        # Insert title variants
         titles = anime_data.get('titles', [])
         for title_entry in titles:
+            if not isinstance(title_entry, dict):
+                continue
             title_type = title_entry.get('type')
             title_text = title_entry.get('title')
             if title_text and title_type != "Default":
@@ -327,10 +379,11 @@ def insert_anime(conn: sqlite3.Connection, anime_data: Dict[str, Any]) -> Option
                     VALUES (?, ?, ?)
                 """, (mal_id, title_type, title_text))
 
+        # Insert title synonyms separately
         title_synonyms = anime_data.get('title_synonyms', [])
         existing_titles = {t.get('title') for t in titles if t.get('title')}
         for synonym in title_synonyms:
-            if synonym and synonym not in existing_titles:
+            if synonym and isinstance(synonym, str) and synonym not in existing_titles:
                 cursor.execute("""
                     INSERT INTO synonyms (anime_id, type, title)
                     VALUES (?, ?, ?)
@@ -339,6 +392,8 @@ def insert_anime(conn: sqlite3.Connection, anime_data: Dict[str, Any]) -> Option
         # Insert producers
         producers = anime_data.get('producers', [])
         for producer in producers:
+            if not isinstance(producer, dict):
+                continue
             producer_id = insert_or_get_entity(cursor, 'producers', producer)
             if producer_id:
                 cursor.execute("""
@@ -349,6 +404,8 @@ def insert_anime(conn: sqlite3.Connection, anime_data: Dict[str, Any]) -> Option
         # Insert licensors
         licensors = anime_data.get('licensors', [])
         for licensor in licensors:
+            if not isinstance(licensor, dict):
+                continue
             licensor_id = insert_or_get_entity(cursor, 'licensors', licensor)
             if licensor_id:
                 cursor.execute("""
@@ -359,6 +416,8 @@ def insert_anime(conn: sqlite3.Connection, anime_data: Dict[str, Any]) -> Option
         # Insert studios
         studios = anime_data.get('studios', [])
         for studio in studios:
+            if not isinstance(studio, dict):
+                continue
             studio_id = insert_or_get_entity(cursor, 'studios', studio)
             if studio_id:
                 cursor.execute("""
@@ -377,6 +436,8 @@ def insert_anime(conn: sqlite3.Connection, anime_data: Dict[str, Any]) -> Option
         for field_name, tag_type in tag_types:
             tags = anime_data.get(field_name, [])
             for tag in tags:
+                if not isinstance(tag, dict):
+                    continue
                 tag_id = insert_or_get_entity(cursor, 'tags', {
                     'mal_id': tag.get('mal_id'),
                     'name': tag.get('name'),
@@ -392,7 +453,9 @@ def insert_anime(conn: sqlite3.Connection, anime_data: Dict[str, Any]) -> Option
         return mal_id
         
     except Exception as e:
-        print(f"Error inserting anime {anime_data.get('mal_id')}: {e}", file=sys.stderr)
+        print(f"Error inserting anime {anime_data.get('id') or anime_data.get('mal_id')}: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
         return None
 
 
