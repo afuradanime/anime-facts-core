@@ -35,6 +35,9 @@ build_lib: $(OBJS)
 patch: build_lib
 	copy /Y anime_facts.dll ..\backend\drivers\anime_facts.dll
 
+patch_test: build_lib
+	copy /Y anime_facts.dll ..\test\anime_facts.dll
+
 run: build
 	./$(TARGET)
 

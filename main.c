@@ -18,6 +18,27 @@ static char DB_PATH[MAX_PATH_LEN] = "anime.db";
 
 char* season_names[5] =  {"spring", "summer", "fall", "winter", "unknown"};
 
+// A global sqlite connection
+/**
+ * We have a global connection to avoid the overhead of opening and closing
+ * the database file every query, also allows us to keep sqlite cache
+*/ 
+static sqlite3* db_conn = NULL;
+
+static sqlite3* get_db() {
+
+    if (db_conn) return db_conn;
+
+    if (sqlite3_open(DB_PATH, &db_conn) != SQLITE_OK) {
+        fprintf(stderr, "Failed to open database: %s\n", sqlite3_errmsg(db_conn));
+        sqlite3_close(db_conn);
+        db_conn = NULL;
+        return NULL;
+    }
+
+    return db_conn;
+}
+
 __declspec(dllexport) void set_database_path(const char* new_path) {
 
     strncpy(DB_PATH, new_path, MAX_PATH_LEN - 1);
@@ -127,14 +148,11 @@ static unsigned char map_season_string(const char* season_str) {
 
 __declspec(dllexport) int fetch_anime_from_query(const char* name, pageable_t page, unsigned int* n, partial_anime_t** data) {
 
-    sqlite3* connection = NULL;
+    sqlite3* connection = get_db();
+    if (!connection) return 1;
+
     *n = 0;
     *data = NULL;
-
-    if (sqlite3_open(DB_PATH, &connection) != SQLITE_OK) {
-        fprintf(stderr, "Failed to open database\n");
-        return 1;
-    }
     
     sqlite3_stmt* stmt;
     int prep_rc = sqlite3_prepare_v2(connection, SQL(
@@ -147,7 +165,6 @@ __declspec(dllexport) int fetch_anime_from_query(const char* name, pageable_t pa
 
     if (prep_rc != SQLITE_OK) {
         fprintf(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
-        sqlite3_close(connection);
         return 1;
     }
 
@@ -158,7 +175,6 @@ __declspec(dllexport) int fetch_anime_from_query(const char* name, pageable_t pa
     if (bind_rc1 != SQLITE_OK) {
         fprintf(stderr, "Failed to bind name filter rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
         sqlite3_finalize(stmt);
-        sqlite3_close(connection);
         return 1;
     }
 
@@ -166,7 +182,6 @@ __declspec(dllexport) int fetch_anime_from_query(const char* name, pageable_t pa
     if (bind_rc2 != SQLITE_OK) {
         fprintf(stderr, "Failed to bind page size filter rc:%d errMsg %s\n", bind_rc2, sqlite3_errmsg(connection));
         sqlite3_finalize(stmt);
-        sqlite3_close(connection);
         return 1;
     }
 
@@ -174,7 +189,6 @@ __declspec(dllexport) int fetch_anime_from_query(const char* name, pageable_t pa
     if (bind_rc3 != SQLITE_OK) {
         fprintf(stderr, "Failed to bind page number filter rc:%d errMsg %s\n", bind_rc3, sqlite3_errmsg(connection));
         sqlite3_finalize(stmt);
-        sqlite3_close(connection);
         return 1;
     }
 
@@ -196,7 +210,6 @@ __declspec(dllexport) int fetch_anime_from_query(const char* name, pageable_t pa
         if (*data == NULL) {
             fprintf(stderr, "Memory allocation failed\n");
             sqlite3_finalize(stmt);
-            sqlite3_close(connection);
             return 1;
         }
     }
@@ -239,8 +252,6 @@ __declspec(dllexport) int fetch_anime_from_query(const char* name, pageable_t pa
     *n = count;
 
     sqlite3_finalize(stmt);
-    sqlite3_close(connection);
-
     return 0;
 }
 
@@ -248,12 +259,8 @@ __declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data) {
     
     if (!data) return 1;
 
-    sqlite3* connection = NULL;
-
-    if (sqlite3_open(DB_PATH, &connection) != SQLITE_OK) {
-        fprintf(stderr, "Failed to open database\n");
-        return 1;
-    }
+    sqlite3* connection = get_db();
+    if (!connection) return 1;
 
     sqlite3_stmt* stmt;
     int prep_rc = sqlite3_prepare_v2(connection, SQL(
@@ -264,7 +271,6 @@ __declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data) {
 
     if (prep_rc != SQLITE_OK) {
         fprintf(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
-        sqlite3_close(connection);
         return 1;
     }
 
@@ -272,7 +278,6 @@ __declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data) {
     if (bind_rc1 != SQLITE_OK) {
         fprintf(stderr, "Failed to bind id rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
         sqlite3_finalize(stmt);
-        sqlite3_close(connection);
         return 1;
     }
 
@@ -280,7 +285,6 @@ __declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data) {
     if (step_rc != SQLITE_ROW) {
         fprintf(stderr, "No anime found with id %u\n", id);
         sqlite3_finalize(stmt);
-        sqlite3_close(connection);
         return 1;  // Not found / error
     }
 
@@ -316,21 +320,16 @@ __declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data) {
     *data = map_partial_anime(&temp);
 
     sqlite3_finalize(stmt);
-    sqlite3_close(connection);
-
     return 0;
 }
 
 __declspec(dllexport) int fetch_anime_this_season(unsigned int* n, partial_anime_t** data) {
     
-    sqlite3* connection = NULL;
+    sqlite3* connection = get_db();
+    if (!connection) return 1;
+    
     *n = 0;
     *data = NULL;
-
-    if (sqlite3_open(DB_PATH, &connection) != SQLITE_OK) {
-        fprintf(stderr, "Failed to open database\n");
-        return 1;
-    }
     
     sqlite3_stmt* stmt;
     int prep_rc = sqlite3_prepare_v2(connection, SQL(
@@ -341,7 +340,6 @@ __declspec(dllexport) int fetch_anime_this_season(unsigned int* n, partial_anime
 
     if (prep_rc != SQLITE_OK) {
         fprintf(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
-        sqlite3_close(connection);
         return 1;
     }
 
@@ -351,7 +349,6 @@ __declspec(dllexport) int fetch_anime_this_season(unsigned int* n, partial_anime
     if (bind_rc1 != SQLITE_OK) {
         fprintf(stderr, "Failed to bind year rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
         sqlite3_finalize(stmt);
-        sqlite3_close(connection);
         return 1;
     }
 
@@ -359,7 +356,6 @@ __declspec(dllexport) int fetch_anime_this_season(unsigned int* n, partial_anime
     if (bind_rc2 != SQLITE_OK) {
         fprintf(stderr, "Failed to bind season rc:%d errMsg %s\n", bind_rc2, sqlite3_errmsg(connection));
         sqlite3_finalize(stmt);
-        sqlite3_close(connection);
         return 1;
     }
 
@@ -380,7 +376,6 @@ __declspec(dllexport) int fetch_anime_this_season(unsigned int* n, partial_anime
         if (*data == NULL) {
             fprintf(stderr, "Memory allocation failed\n");
             sqlite3_finalize(stmt);
-            sqlite3_close(connection);
             return 1;
         }
     }
@@ -422,9 +417,23 @@ __declspec(dllexport) int fetch_anime_this_season(unsigned int* n, partial_anime
     *n = count;
 
     sqlite3_finalize(stmt);
-    sqlite3_close(connection);
-
     return 0;
+}
+
+#include <Windows.h>
+
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
+
+    //https://learn.microsoft.com/en-us/windows/win32/dlls/dllmain
+    // On unload from the virtual address space close the database connection if was open
+    // TODO: put some guards on this and find way to make it work on linux(?)
+    if (fdwReason == DLL_PROCESS_DETACH) {
+        if (db_conn) {
+            sqlite3_close(db_conn);
+            db_conn = NULL;
+        }
+    }
+    return TRUE;
 }
 
 int main(void) {
