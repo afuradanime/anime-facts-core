@@ -12,9 +12,17 @@
 
 #define SQL(...) #__VA_ARGS__
 
-#define DB_PATH "../anime.db"
+// Path to the database file
+#define MAX_PATH_LEN 1024
+static char DB_PATH[MAX_PATH_LEN] = "anime.db";
 
 char* season_names[5] =  {"spring", "summer", "fall", "winter", "unknown"};
+
+__declspec(dllexport) void set_database_path(const char* new_path) {
+
+    strncpy(DB_PATH, new_path, MAX_PATH_LEN - 1);
+    DB_PATH[MAX_PATH_LEN - 1] = '\0';
+}
 
 __declspec(dllexport) void free_anime(anime_t* anime) {
     if (!anime) return;

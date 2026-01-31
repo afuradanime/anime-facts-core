@@ -8,6 +8,11 @@
 extern char* season_names[5];
 
 // dll interface
+
+// Set up
+__declspec(dllexport) void set_database_path(const char* new_path);
+
+// Access database
 __declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data);
 
 __declspec(dllexport) season_t current_season();

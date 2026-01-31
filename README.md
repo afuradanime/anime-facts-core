@@ -29,6 +29,8 @@ Este ficheiro pode ser utilizado em qualquer projecto capaz de interagir com bib
 
 int main(void) {
 
+    set_database_path("../anime.db");
+
     anime_t a;
     if (fetch_anime_by_id(15523, &a) == 0) {
 
