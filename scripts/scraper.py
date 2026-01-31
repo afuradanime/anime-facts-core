@@ -3,7 +3,6 @@ import json
 import time
 from typing import Dict, Any, List
 
-OUTPUT_FILE = "./../data/anime_data_all.jsonl"
 BASE_URL = "https://api.jikan.moe/v4/anime"
 
 def extract_anime_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -158,14 +157,14 @@ def extract_anime_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
         "demographics": demographics
     }
 
-def run_scraper():
+def run_scraper(output_file: str):
     page = 1
     total_saved = 0
     consecutive_errors = 0
     
-    print("Starting global scrape. Press Ctrl+C to stop manually.")
+    print("Starting scraper. Press Ctrl+C to stop manually.")
     
-    with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
+    with open(output_file, 'w', encoding='utf-8') as f:
         while True:
             try:
                 # print(f"Fetching page {page}...", end='\r') # Optional: Keep console clean
@@ -217,7 +216,6 @@ def run_scraper():
                 
                 page += 1
                 
-                # Polite Delay: 1 second is usually safe for Jikan
                 time.sleep(1) 
                 
             except KeyboardInterrupt:
@@ -225,10 +223,27 @@ def run_scraper():
                 break
             except Exception as e:
                 print(f"\nUnexpected error on page {page}: {e}")
-                time.sleep(5) # Pause briefly before trying next page
+                time.sleep(5)
 
     print(f"\nDone! Total anime saved: {total_saved}")
-    print(f"Data stored in {OUTPUT_FILE}")
+    print(f"Data stored in {output_file}")
 
 if __name__ == "__main__":
-    run_scraper()
+
+    import argparse
+    from pathlib import Path
+    
+    parser = argparse.ArgumentParser(
+        description="Scrape MAL data from jikan"
+    )
+
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("anime_data_all.jsonl"),
+        help="Path to output json file (default: anime_data_all.jsonl)"
+    )
+    
+    args = parser.parse_args()
+
+    run_scraper(args.output)
