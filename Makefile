@@ -1,7 +1,7 @@
 # CC="D:\mingw64\bin\gcc.exe"
 CC = gcc
 CFLAGS = -Wall -O2
-CFLAGS_64 = -Wall -O2
+CFLAGS_QUIET = -Wall -O2 -DQUIET
 TARGET = anime_facts.exe
 TARGET_LIB = anime_facts.dll
 IMPORT_LIB = libanime_facts.a
@@ -24,7 +24,12 @@ $(SRC_DIR)/anime.o: $(SRC_DIR)/anime.c include/anime.h
 	$(CC) $(CFLAGS) -c $(SRC_DIR)/anime.c -o $(SRC_DIR)/anime.o
 
 # Build DLL
+build_lib: CFLAGS=$(CFLAGS)
 build_lib: $(OBJS)
+	$(CC) -shared -o $(TARGET_LIB) -Wl,--out-implib,$(IMPORT_LIB) $(OBJS)
+
+build_lib_quiet: CFLAGS=$(CFLAGS_QUIET)
+build_lib_quiet: clean $(OBJS)
 	$(CC) -shared -o $(TARGET_LIB) -Wl,--out-implib,$(IMPORT_LIB) $(OBJS)
 
 patch: build_lib
@@ -37,7 +42,7 @@ patch_test: build_lib
 benchmark/benchmark.o: benchmark/benchmark.c include/anime.h include/anime_facts_api.h include/dynamic_array.h
 	$(CC) $(CFLAGS) -c benchmark/benchmark.c -o benchmark/benchmark.o
 
-benchmark: build_lib benchmark/benchmark.o
+benchmark: build_lib_quiet benchmark/benchmark.o
 	$(CC) $(CFLAGS) -o $(BENCHMARK_EXE) benchmark/benchmark.o -L. -lanime_facts
 
 run_benchmark: benchmark
