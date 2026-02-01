@@ -435,29 +435,3 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     }
     return TRUE;
 }
-
-int main(void) {
-    printf("Hello, world!\n\n");
-
-    partial_anime_t* data = NULL;
-    unsigned int n = 0;
-    
-    if (fetch_anime_from_query("bebop", (pageable_t) {
-        .page_number = 0,
-        .page_size = 25
-    }, &n, &data) == 0 && n > 0) {
-        for(size_t i = 0; i < n; i++) {
-            printf("[%d] %s\n", data[i].id, data[i].title);
-        }
-
-        free_partial_anime_array(data, n);
-    }
-
-    // partial_anime_t a;
-    // if (fetch_anime_by_id(1, &a) == 0) {
-    //     printf("[%d] %s\n", a.id, a.title);
-    //     free_partial_anime(&a);
-    // }
-    
-    return 0;
-}

@@ -13,20 +13,15 @@ SRCS = main.c $(SRC_DIR)/dynamic_array.c $(SRC_DIR)/anime.c
 # Object files
 OBJS = main.o $(SRC_DIR)/dynamic_array.o $(SRC_DIR)/anime.o sqlite3/sqlite3.o
 
-all: build
+BENCHMARK_EXE = benchmark.exe
 
-main.o: main.c include/anime.h include/anime_facts_api.h include/dynamic_array.h
-	$(CC) $(CFLAGS) -c main.c -o main.o
+all: build_lib
 
 $(SRC_DIR)/dynamic_array.o: $(SRC_DIR)/dynamic_array.c include/dynamic_array.h include/anime.h
 	$(CC) $(CFLAGS) -c $(SRC_DIR)/dynamic_array.c -o $(SRC_DIR)/dynamic_array.o
 
 $(SRC_DIR)/anime.o: $(SRC_DIR)/anime.c include/anime.h
 	$(CC) $(CFLAGS) -c $(SRC_DIR)/anime.c -o $(SRC_DIR)/anime.o
-
-# Build executable
-build: $(OBJS)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)
 
 # Build DLL
 build_lib: $(OBJS)
@@ -38,6 +33,16 @@ patch: build_lib
 patch_test: build_lib
 	copy /Y anime_facts.dll ..\test\anime_facts.dll
 
+# Becnhmarking
+benchmark/benchmark.o: benchmark/benchmark.c include/anime.h include/anime_facts_api.h include/dynamic_array.h
+	$(CC) $(CFLAGS) -c benchmark/benchmark.c -o benchmark/benchmark.o
+
+benchmark: build_lib benchmark/benchmark.o
+	$(CC) $(CFLAGS) -o $(BENCHMARK_EXE) benchmark/benchmark.o -L. -lanime_facts
+
+run_benchmark: benchmark
+	./$(BENCHMARK_EXE)
+
 run: build
 	./$(TARGET)
 
@@ -48,8 +53,10 @@ sqlite:
 clean:
 	del /Q main.o 2>nul || true
 	del /Q $(SRC_DIR)\\dynamic_array.o 2>nul || true
+	del /Q benchmark\\benchmark.o 2>nul || true
 	del /Q $(SRC_DIR)\\anime.o 2>nul || true
 	del /Q $(TARGET) $(TARGET_LIB) $(IMPORT_LIB) 2>nul || true
+	del /Q $(BENCHMARK_EXE) 2>nul || true
 	@echo Cleaned build artifacts
 
 .PHONY: sqlite main link build build_lib run clean
