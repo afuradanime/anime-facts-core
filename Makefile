@@ -24,7 +24,7 @@ $(SRC_DIR)/anime.o: $(SRC_DIR)/anime.c include/anime.h
 	$(CC) $(CFLAGS) -c $(SRC_DIR)/anime.c -o $(SRC_DIR)/anime.o
 
 # Build DLL
-build_lib: CFLAGS=$(CFLAGS)
+build_lib: CFLAGS= -Wall -O2
 build_lib: $(OBJS)
 	$(CC) -shared -o $(TARGET_LIB) -Wl,--out-implib,$(IMPORT_LIB) $(OBJS)
 

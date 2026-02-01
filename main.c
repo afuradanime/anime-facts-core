@@ -49,6 +49,16 @@ static sqlite3* get_db() {
     return db_conn;
 }
 
+// Manual closing shouldn't be necessary, but if you want, for whatever reason, to unlock
+// the database file, there you go
+// TODO: Currently necessary on non windows systems!
+__declspec(dllexport) void close_db() {
+    if (db_conn) {
+        sqlite3_close(db_conn);
+        db_conn = NULL;
+    }
+}
+
 __declspec(dllexport) void set_database_path(const char* new_path) {
 
     strncpy(DB_PATH, new_path, MAX_PATH_LEN - 1);
@@ -154,6 +164,14 @@ static unsigned char map_season_string(const char* season_str) {
     if (strcmp(season_str, "fall") == 0) return FALL;
     if (strcmp(season_str, "winter") == 0) return WINTER;
     return UNDEFINED;
+}
+
+static unsigned char map_tag_type(const char* type) {
+    if (!type) return TAG_GENRE;
+    if (strcmp(type, "genre") == 0) return TAG_GENRE;
+    if (strcmp(type, "theme") == 0) return TAG_THEME;
+    if (strcmp(type, "demographic") == 0) return TAG_DEMOGRAPHIC;
+    return TAG_EXPLICIT_GENRE;
 }
 
 __declspec(dllexport) int fetch_anime_from_query(const char* name, pageable_t page, unsigned int* n, partial_anime_t** data) {
@@ -265,6 +283,157 @@ __declspec(dllexport) int fetch_anime_from_query(const char* name, pageable_t pa
     return 0;
 }
 
+static int fetch_synonyms(sqlite3* db, unsigned int anime_id, anime_t* anime) {
+    sqlite3_stmt* stmt;
+
+    if (sqlite3_prepare_v2(db, SQL(
+        SELECT title FROM synonyms WHERE anime_id = ?
+    ), -1, &stmt, NULL) != SQLITE_OK)
+        return 1;
+
+    sqlite3_bind_int(stmt, 1, anime_id);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char* title = get_text_or_null(stmt, 0);
+        if (title)
+            add_anime_synonym(anime, title);
+    }
+
+    sqlite3_finalize(stmt);
+    return 0;
+}
+
+static int fetch_descriptions(sqlite3* db, unsigned int anime_id, anime_t* anime) {
+    sqlite3_stmt* stmt;
+
+    if (sqlite3_prepare_v2(db, SQL(
+        SELECT language_id, description
+        FROM anime_descriptions
+        WHERE anime_id = ?
+    ), -1, &stmt, NULL) != SQLITE_OK)
+        return 1;
+
+    sqlite3_bind_int(stmt, 1, anime_id);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        unsigned char language = (unsigned char)sqlite3_column_int(stmt, 0);
+        const char* desc = get_text_or_null(stmt, 1);
+
+        if (desc)
+            add_anime_description(anime, language, desc);
+    }
+
+    sqlite3_finalize(stmt);
+    return 0;
+}
+
+static int fetch_producers(sqlite3* db, unsigned int anime_id, anime_t* anime) {
+    sqlite3_stmt* stmt;
+
+    if (sqlite3_prepare_v2(db, SQL(
+        SELECT p.id, p.name, p.type, p.url
+        FROM anime_producers ap
+        JOIN producers p ON p.id = ap.producer_id
+        WHERE ap.anime_id = ?
+    ), -1, &stmt, NULL) != SQLITE_OK)
+        return 1;
+
+    sqlite3_bind_int(stmt, 1, anime_id);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        add_anime_producer(
+            anime,
+            sqlite3_column_int(stmt, 0),
+            get_text_or_null(stmt, 1),
+            get_text_or_null(stmt, 2),
+            get_text_or_null(stmt, 3)
+        );
+    }
+
+    sqlite3_finalize(stmt);
+    return 0;
+}
+
+static int fetch_licensors(sqlite3* db, unsigned int anime_id, anime_t* anime) {
+    sqlite3_stmt* stmt;
+
+    if (sqlite3_prepare_v2(db, SQL(
+        SELECT l.id, l.name, l.type, l.url
+        FROM anime_licensors al
+        JOIN licensors l ON l.id = al.licensor_id
+        WHERE al.anime_id = ?
+    ), -1, &stmt, NULL) != SQLITE_OK)
+        return 1;
+
+    sqlite3_bind_int(stmt, 1, anime_id);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        add_anime_licensor(
+            anime,
+            sqlite3_column_int(stmt, 0),
+            get_text_or_null(stmt, 1),
+            get_text_or_null(stmt, 2),
+            get_text_or_null(stmt, 3)
+        );
+    }
+
+    sqlite3_finalize(stmt);
+    return 0;
+}
+
+static int fetch_studios(sqlite3* db, unsigned int anime_id, anime_t* anime) {
+    sqlite3_stmt* stmt;
+
+    if (sqlite3_prepare_v2(db, SQL(
+        SELECT s.id, s.name, s.url
+        FROM anime_studios _as
+        JOIN studios s ON s.id = _as.studio_id
+        WHERE _as.anime_id = ?
+    ), -1, &stmt, NULL) != SQLITE_OK)
+        return 1;
+
+    sqlite3_bind_int(stmt, 1, anime_id);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        add_anime_studio(
+            anime,
+            sqlite3_column_int(stmt, 0),
+            get_text_or_null(stmt, 1),
+            get_text_or_null(stmt, 2)
+        );
+    }
+
+    sqlite3_finalize(stmt);
+    return 0;
+}
+
+static int fetch_tags(sqlite3* db, unsigned int anime_id, anime_t* anime) {
+    sqlite3_stmt* stmt;
+
+    if (sqlite3_prepare_v2(db, SQL(
+        SELECT t.id, t.name, t.type, t.url
+        FROM anime_tags at
+        JOIN tags t ON t.id = at.tag_id
+        WHERE at.anime_id = ?
+    ), -1, &stmt, NULL) != SQLITE_OK)
+        return 1;
+
+    sqlite3_bind_int(stmt, 1, anime_id);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        add_anime_tag(
+            anime,
+            sqlite3_column_int(stmt, 0),
+            get_text_or_null(stmt, 1),
+            map_tag_type(get_text_or_null(stmt, 2)),
+            get_text_or_null(stmt, 3)
+        );
+    }
+
+    sqlite3_finalize(stmt);
+    return 0;
+}
+
 __declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data) {
     
     if (!data) return 1;
@@ -326,8 +495,14 @@ __declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data) {
         get_text_or_null(stmt, 19)
     );
 
-    // TODO: Get all info here
     *data = map_partial_anime(&temp);
+
+    fetch_synonyms(connection, id, data);
+    fetch_descriptions(connection, id, data);
+    fetch_producers(connection, id, data);
+    fetch_licensors(connection, id, data);
+    fetch_studios(connection, id, data);
+    fetch_tags(connection, id, data);
 
     sqlite3_finalize(stmt);
     return 0;
@@ -430,6 +605,8 @@ __declspec(dllexport) int fetch_anime_this_season(unsigned int* n, partial_anime
     return 0;
 }
 
+#ifdef _WIN32
+
 #include <Windows.h>
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
@@ -437,11 +614,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
     //https://learn.microsoft.com/en-us/windows/win32/dlls/dllmain
     // On unload from the virtual address space close the database connection if was open
     // TODO: put some guards on this and find way to make it work on linux(?)
-    if (fdwReason == DLL_PROCESS_DETACH) {
-        if (db_conn) {
-            sqlite3_close(db_conn);
-            db_conn = NULL;
-        }
-    }
+    if (fdwReason == DLL_PROCESS_DETACH) close_db();
     return TRUE;
 }
+
+#endif

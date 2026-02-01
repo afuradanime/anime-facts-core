@@ -1,0 +1,4 @@
+date;commit;function;avg;min;max;tester
+01/02/2026;f9f117e;fetch_anime_by_id;0.277383;0.193100;2.054700;Sagiri719
+01/02/2026;f9f117e;fetch_anime_this_season;0.824500;0.583100;4.658100;Sagiri719
+01/02/2026;f9f117e;fetch_anime_from_query;0.833642;0.582600;2.834200;Sagiri719

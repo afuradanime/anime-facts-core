@@ -40,17 +40,6 @@ void benchmark(const char* name, size_t max_calls, benchmark_fn fn, void* ctx) {
 }
 
 typedef struct {
-    const char* query;
-    pageable_t page;
-    unsigned int n;
-    partial_anime_t* data;
-} fetch_from_query_ctx_t;
-
-void bench_fetch_anime_from_query(size_t i, void* ctx) {
-
-}
-
-typedef struct {
     anime_t anime;
 } fetch_by_id_ctx_t;
 
@@ -71,6 +60,20 @@ void bench_fetch_anime_this_season(size_t i, void* ctx) {
     free_partial_anime_array(c->anime, n);
 }
 
+typedef struct {
+    const char* query;
+    pageable_t page;
+    unsigned int n;
+    partial_anime_t* data;
+} fetch_from_query_ctx_t;
+
+void bench_fetch_anime_from_query(size_t i, void* ctx) {
+    fetch_this_season_ctx_t* c = ctx;
+    unsigned int n;
+    fetch_anime_this_season(&n, &c->anime);
+    free_partial_anime_array(c->anime, n);
+}
+
 int main(void) {
 
     set_database_path("../anime.db");
@@ -84,7 +87,7 @@ int main(void) {
     );
 
     fetch_this_season_ctx_t ctx2;
-        benchmark(
+    benchmark(
         "fetch_anime_this_season",
         MAX_CALLS,
         bench_fetch_anime_this_season,
@@ -93,8 +96,17 @@ int main(void) {
 
     fetch_from_query_ctx_t ctx3 = {
         .query = "a",
-        .page = {0, 20},
+        .page = {
+            .page_number = 0,
+            .page_size = 20
+        },
         .n = 0,
         .data = NULL
     };
+    benchmark(
+        "fetch_anime_from_query",
+        MAX_CALLS,
+        bench_fetch_anime_from_query,
+        &ctx3
+    );
 }
