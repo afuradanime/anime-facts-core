@@ -8,10 +8,10 @@ IMPORT_LIB = libanime_facts.a
 
 # Source files
 SRC_DIR = src
-SRCS = main.c $(SRC_DIR)/dynamic_array.c $(SRC_DIR)/anime.c
+SRCS = main.c $(SRC_DIR)/dynamic_array.c $(SRC_DIR)/anime.c $(SRC_DIR)/printer.c
 
 # Object files
-OBJS = main.o $(SRC_DIR)/dynamic_array.o $(SRC_DIR)/anime.o sqlite3/sqlite3.o
+OBJS = main.o $(SRC_DIR)/dynamic_array.o $(SRC_DIR)/anime.o $(SRC_DIR)/printer.o sqlite3/sqlite3.o
 
 BENCHMARK_EXE = benchmark.exe
 
@@ -22,6 +22,9 @@ $(SRC_DIR)/dynamic_array.o: $(SRC_DIR)/dynamic_array.c include/dynamic_array.h i
 
 $(SRC_DIR)/anime.o: $(SRC_DIR)/anime.c include/anime.h
 	$(CC) $(CFLAGS) -c $(SRC_DIR)/anime.c -o $(SRC_DIR)/anime.o
+
+$(SRC_DIR)/printer.o: $(SRC_DIR)/printer.c
+	$(CC) $(CFLAGS) -c $(SRC_DIR)/printer.c -o $(SRC_DIR)/printer.o
 
 # Build DLL
 build_lib: CFLAGS= -Wall -O2
