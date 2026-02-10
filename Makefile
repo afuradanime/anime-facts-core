@@ -1,15 +1,25 @@
 # CC="D:\mingw64\bin\gcc.exe"
 CC = gcc
-CFLAGS = -Wall -O2 -fPIC -DBUILDING_DLL
-CFLAGS_QUIET = -Wall -O2 -DQUIET -fPIC -DBUILDING_DLL
 
-# Windows-specific flag for SQLite
+# Detect OS and set appropriate flags and targets
 ifeq ($(OS),Windows_NT)
+    # Windows build
     SQLITE_CFLAGS = -DSQLITE_OS_WIN=1
+    TARGET = anime_facts.exe
+    TARGET_LIB = anime_facts.dll
+    IMPORT_LIB = libanime_facts.a
+    CFLAGS = -Wall -O2 -fPIC -DBUILDING_DLL
+    CFLAGS_QUIET = -Wall -O2 -DQUIET -fPIC -DBUILDING_DLL
+    BUILD_CMD = $(CC) -shared -o $(TARGET_LIB) -Wl,--out-implib,$(IMPORT_LIB) $(OBJS)
+else
+    # Linux/Unix build
+    TARGET = anime_facts
+    TARGET_LIB = libanime_facts.so
+    IMPORT_LIB = 
+    CFLAGS = -Wall -O2 -fPIC
+    CFLAGS_QUIET = -Wall -O2 -DQUIET -fPIC
+    BUILD_CMD = $(CC) -shared -o $(TARGET_LIB) $(OBJS)
 endif
-TARGET = anime_facts.exe
-TARGET_LIB = anime_facts.dll
-IMPORT_LIB = libanime_facts.a
 
 # Source files
 SRC_DIR = src
@@ -38,19 +48,17 @@ sqlite3/sqlite3.o: sqlite3/sqlite3.c sqlite3/sqlite3.h
 	$(CC) $(CFLAGS) $(SQLITE_CFLAGS) -c sqlite3/sqlite3.c -o sqlite3/sqlite3.o
 
 # Build DLL
-build_lib: CFLAGS= -Wall -O2 -fPIC -DBUILDING_DLL
 build_lib: $(OBJS)
-	$(CC) -shared -o $(TARGET_LIB) -Wl,--out-implib,$(IMPORT_LIB) $(OBJS)
+	$(BUILD_CMD)
 
-build_lib_quiet: CFLAGS=$(CFLAGS_QUIET)
 build_lib_quiet: clean $(OBJS)
-	$(CC) -shared -o $(TARGET_LIB) -Wl,--out-implib,$(IMPORT_LIB) $(OBJS)
+	$(BUILD_CMD)
 
 patch: build_lib
-	copy /Y anime_facts.dll ..\backend\drivers\anime_facts.dll
+	@if [ -f $(TARGET_LIB) ]; then cp $(TARGET_LIB) ../backend/drivers/$(TARGET_LIB); echo "Copied $(TARGET_LIB) to ../backend/drivers/"; else echo "Error: $(TARGET_LIB) not found"; fi
 
 patch_test: build_lib
-	copy /Y anime_facts.dll ..\test\anime_facts.dll
+	@if [ -f $(TARGET_LIB) ]; then cp $(TARGET_LIB) ../test/$(TARGET_LIB); echo "Copied $(TARGET_LIB) to ../test/"; else echo "Error: $(TARGET_LIB) not found"; fi
 
 # Becnhmarking
 benchmark/benchmark.o: benchmark/benchmark.c include/anime.h include/anime_facts_api.h include/dynamic_array.h
