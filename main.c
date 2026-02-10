@@ -7,6 +7,7 @@
 #include "include/pageable.h"
 #include "include/anime_facts_api.h"
 #include "include/dynamic_array.h"
+#include "include/build_dll.h"
 
 #include "sqlite3/sqlite3.h"
 
@@ -52,20 +53,20 @@ static sqlite3* get_db() {
 // Manual closing shouldn't be necessary, but if you want, for whatever reason, to unlock
 // the database file, there you go
 // TODO: Currently necessary on non windows systems!
-__declspec(dllexport) void close_db() {
+API void close_db() {
     if (db_conn) {
         sqlite3_close(db_conn);
         db_conn = NULL;
     }
 }
 
-__declspec(dllexport) void set_database_path(const char* new_path) {
+API void set_database_path(const char* new_path) {
 
     strncpy(DB_PATH, new_path, MAX_PATH_LEN - 1);
     DB_PATH[MAX_PATH_LEN - 1] = '\0';
 }
 
-__declspec(dllexport) void free_anime(anime_t* anime) {
+API void free_anime(anime_t* anime) {
     if (!anime) return;
     
     // Free strings
@@ -94,13 +95,13 @@ __declspec(dllexport) void free_anime(anime_t* anime) {
     memset(anime, 0, sizeof(anime_t));
 }
 
-__declspec(dllexport) void free_anime_array(anime_t* data, unsigned int n) {
+API void free_anime_array(anime_t* data, unsigned int n) {
     
     for (size_t i = 0; i < n; i++) free_anime(&data[i]);
     free(data);
 }
 
-__declspec(dllexport) void free_partial_anime(partial_anime_t* anime) {
+API void free_partial_anime(partial_anime_t* anime) {
     if (!anime) return;
     
     // Free strings
@@ -121,13 +122,13 @@ __declspec(dllexport) void free_partial_anime(partial_anime_t* anime) {
     memset(anime, 0, sizeof(partial_anime_t));
 }
 
-__declspec(dllexport) void free_partial_anime_array(partial_anime_t* data, unsigned int n) {
+API void free_partial_anime_array(partial_anime_t* data, unsigned int n) {
     
     for (size_t i = 0; i < n; i++) free_partial_anime(&data[i]);
     free(data);
 }
 
-__declspec(dllexport) season_t current_season() {
+API season_t current_season() {
 
     time_t now = time(NULL);
     struct tm* t = localtime(&now);
@@ -174,7 +175,7 @@ static unsigned char map_tag_type(const char* type) {
     return TAG_EXPLICIT_GENRE;
 }
 
-__declspec(dllexport) int fetch_anime_from_query(const char* name, pageable_t page, unsigned int* n, partial_anime_t** data) {
+API int fetch_anime_from_query(const char* name, pageable_t page, unsigned int* n, partial_anime_t** data) {
 
     sqlite3* connection = get_db();
     if (!connection) return 1;
@@ -434,7 +435,7 @@ static int fetch_tags(sqlite3* db, unsigned int anime_id, anime_t* anime) {
     return 0;
 }
 
-__declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data) {
+API int fetch_anime_by_id(unsigned int id, anime_t* data) {
     
     if (!data) return 1;
 
@@ -508,7 +509,7 @@ __declspec(dllexport) int fetch_anime_by_id(unsigned int id, anime_t* data) {
     return 0;
 }
 
-__declspec(dllexport) int fetch_anime_this_season(unsigned int* n, partial_anime_t** data) {
+API int fetch_anime_this_season(unsigned int* n, partial_anime_t** data) {
     
     sqlite3* connection = get_db();
     if (!connection) return 1;

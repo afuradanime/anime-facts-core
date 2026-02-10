@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "../include/anime_facts_api.h"
+#include "../include/build_dll.h"
 
 static const char* anime_type_to_string(enum anime_type type) {
     switch (type) {
@@ -59,7 +60,7 @@ static void print_string_array(const char* label, const string_array_t* arr) {
     }
 }
 
-__declspec(dllexport) void print_anime(const anime_t* a) {
+API void print_anime(const anime_t* a) {
     if (!a) return;
 
     printf("==================================================\n");
