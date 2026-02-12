@@ -25,16 +25,16 @@ Este ficheiro pode ser utilizado em qualquer projecto capaz de interagir com bib
 ## Como utilizar o motor de pesquisa
 ```c
 #include <stdio.h>
-#include "../anime_facts/include/anime_facts_api.h"
+#include "../anime-facts-core/include/anime_facts_api.h"
 
 int main(void) {
 
     set_database_path("../anime.db");
 
     anime_t a;
-    if (fetch_anime_by_id(15523, &a) == 0) {
+    if (fetch_anime_by_id(5680, &a) == 0) {
 
-        printf("[%d] %s\n", a.id, a.title);
+        print_anime(&a);
         free_anime(&a);
     }
 
