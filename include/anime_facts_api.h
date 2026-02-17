@@ -16,7 +16,7 @@ API void close_db();
 
 // Anime interface
 API int fetch_anime_by_id(unsigned int id, anime_t* data);
-API int fetch_anime_this_season(unsigned int* n, partial_anime_t** data);
+API int fetch_anime_this_season(pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data);
 API int fetch_anime_from_query(const char* name, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data);
 API int fetch_anime_from_tag(unsigned int tag_id, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data);
 

@@ -579,7 +579,7 @@ API int fetch_anime_by_id(unsigned int id, anime_t* data) {
     return 0;
 }
 
-API int fetch_anime_this_season(unsigned int* n, partial_anime_t** data) {
+API int fetch_anime_this_season(pageable_t page, unsigned int *n, unsigned int *total, partial_anime_t **data) {
     
     sqlite3* connection = get_db();
     if (!connection) return 1;
@@ -592,6 +592,8 @@ API int fetch_anime_this_season(unsigned int* n, partial_anime_t** data) {
         SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url
         FROM anime a
         WHERE a.year = ? AND a.season = ?
+        ORDER BY a.quality_score DESC, a.title ASC
+        LIMIT ? OFFSET ?
     ), -1, &stmt, 0);
 
     if (prep_rc != SQLITE_OK) {
@@ -615,6 +617,61 @@ API int fetch_anime_this_season(unsigned int* n, partial_anime_t** data) {
         return 1;
     }
 
+    int bind_rc3 = sqlite3_bind_int(stmt, 3, page.page_size);
+    if (bind_rc3 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind page size filter rc:%d errMsg %s\n", bind_rc3, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int bind_rc4 = sqlite3_bind_int(stmt, 4, page.page_number * page.page_size);
+    if (bind_rc4 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind page number filter rc:%d errMsg %s\n", bind_rc4, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    // Get total page count for client side pagination
+    sqlite3_stmt* count_stmt;
+    int count_prep_rc = sqlite3_prepare_v2(connection, SQL(
+        SELECT COUNT(*)
+        FROM anime a
+        WHERE a.year = ? AND a.season = ?
+    ), -1, &count_stmt, 0);
+
+    if (count_prep_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare count statement rc:%d errMsg %s\n", count_prep_rc, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int count_bind_rc1 = sqlite3_bind_int(count_stmt, 1, cur_season.year);
+    if (count_bind_rc1 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind year for count statement rc:%d errMsg %s\n", count_bind_rc1, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(count_stmt);
+        return 1;
+    }
+
+    int count_bind_rc2 = sqlite3_bind_text(count_stmt, 2, season_names[cur_season.season], -1, NULL);
+    if (count_bind_rc2 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind season for count statement rc:%d errMsg %s\n", count_bind_rc2, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(count_stmt);
+        return 1;
+    }
+
+    int count_step_rc = sqlite3_step(count_stmt);
+    if (count_step_rc != SQLITE_ROW) {
+        log_msg(stderr, "Failed to execute count statement rc:%d errMsg %s\n", count_step_rc, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(count_stmt);
+        return 1;
+    }
+
+    int total_count = sqlite3_column_int(count_stmt, 0);
+    *total = (total_count + page.page_size - 1) / page.page_size; // Calculate total pages
+
     // count results
     size_t count = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -636,6 +693,7 @@ API int fetch_anime_this_season(unsigned int* n, partial_anime_t** data) {
     }
 
     sqlite3_finalize(stmt);
+    sqlite3_finalize(count_stmt);
     return 0;
 }
 
