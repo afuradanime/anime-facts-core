@@ -53,3 +53,4 @@ dkms.conf
 
 # debug information files
 *.dwo
+scripts/anime_data_all.jsonl
