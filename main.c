@@ -249,7 +249,7 @@ static unsigned char map_tag_type(const char* type) {
     return TAG_EXPLICIT_GENRE;
 }
 
-API int fetch_anime_from_query(const char* name, pageable_t page, unsigned int* n, partial_anime_t** data) {
+API int fetch_anime_from_query(const char* name, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data) {
 
     sqlite3* connection = get_db();
     if (!connection) return 1;
@@ -295,6 +295,39 @@ API int fetch_anime_from_query(const char* name, pageable_t page, unsigned int* 
         return 1;
     }
 
+    // Get total page count for client side pagination
+    sqlite3_stmt* count_stmt;
+    int count_prep_rc = sqlite3_prepare_v2(connection, SQL(
+        SELECT COUNT(*)
+        FROM anime a
+        WHERE a.title LIKE ?
+    ), -1, &count_stmt, 0);
+
+    if (count_prep_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare count statement rc:%d errMsg %s\n", count_prep_rc, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int count_bind_rc = sqlite3_bind_text(count_stmt, 1, pattern, -1, NULL);
+    if (count_bind_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind name filter for count statement rc:%d errMsg %s\n", count_bind_rc, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(count_stmt);
+        return 1;
+    }
+
+    int count_step_rc = sqlite3_step(count_stmt);
+    if (count_step_rc != SQLITE_ROW) {
+        log_msg(stderr, "Failed to execute count statement rc:%d errMsg %s\n", count_step_rc, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(count_stmt);
+        return 1;
+    }
+
+    int total_count = sqlite3_column_int(count_stmt, 0);
+    *total = (total_count + page.page_size - 1) / page.page_size; // Calculate total pages
+
     // count results
     size_t count = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -317,6 +350,7 @@ API int fetch_anime_from_query(const char* name, pageable_t page, unsigned int* 
     }
 
     sqlite3_finalize(stmt);
+    sqlite3_finalize(count_stmt);
     return 0;
 }
 
@@ -605,7 +639,7 @@ API int fetch_anime_this_season(unsigned int* n, partial_anime_t** data) {
     return 0;
 }
 
-static int fetch_anime_from_studio_id(unsigned int studio_id, pageable_t page, unsigned int* n, partial_anime_t** data) {
+static int fetch_anime_from_studio_id(unsigned int studio_id, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data) {
 
     sqlite3* connection = get_db();
     if (!connection) return 1;
@@ -646,6 +680,40 @@ static int fetch_anime_from_studio_id(unsigned int studio_id, pageable_t page, u
         return 1;
     }
 
+    // Get total page count for client side pagination
+    sqlite3_stmt* count_stmt;
+    int count_prep_rc = sqlite3_prepare_v2(connection, SQL(
+        SELECT COUNT(*)
+        FROM anime_studios _as
+        JOIN anime a ON a.id = _as.anime_id
+        WHERE _as.studio_id = ?
+    ), -1, &count_stmt, 0);
+
+    if (count_prep_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare count statement rc:%d errMsg %s\n", count_prep_rc, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int count_bind_rc = sqlite3_bind_int(count_stmt, 1, studio_id);
+    if (count_bind_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind studio id for count statement rc:%d errMsg %s\n", count_bind_rc, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(count_stmt);
+        return 1;
+    }
+
+    int count_step_rc = sqlite3_step(count_stmt);
+    if (count_step_rc != SQLITE_ROW) {
+        log_msg(stderr, "Failed to execute count statement rc:%d errMsg %s\n", count_step_rc, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(count_stmt);
+        return 1;
+    }
+
+    int total_count = sqlite3_column_int(count_stmt, 0);
+    *total = (total_count + page.page_size - 1) / page.page_size; // Calculate total pages
+
     // count results
     size_t count = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -668,10 +736,11 @@ static int fetch_anime_from_studio_id(unsigned int studio_id, pageable_t page, u
     }
 
     sqlite3_finalize(stmt);
+    sqlite3_finalize(count_stmt);
     return 0;
 }
 
-static int fetch_anime_from_producer_id(unsigned int producer_id, pageable_t page, unsigned int* n, partial_anime_t** data) {
+static int fetch_anime_from_producer_id(unsigned int producer_id, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data) {
 
     sqlite3* connection = get_db();
     if (!connection) return 1;
@@ -712,6 +781,40 @@ static int fetch_anime_from_producer_id(unsigned int producer_id, pageable_t pag
         return 1;
     }
 
+    // Get total page count for client side pagination
+    sqlite3_stmt* count_stmt;
+    int count_prep_rc = sqlite3_prepare_v2(connection, SQL(
+        SELECT COUNT(*)
+        FROM anime_producers ap
+        JOIN anime a ON a.id = ap.anime_id
+        WHERE ap.producer_id = ?
+    ), -1, &count_stmt, 0);
+
+    if (count_prep_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare count statement rc:%d errMsg %s\n", count_prep_rc, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int count_bind_rc = sqlite3_bind_int(count_stmt, 1, producer_id);
+    if (count_bind_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind producer id for count statement rc:%d errMsg %s\n", count_bind_rc, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(count_stmt);
+        return 1;
+    }
+
+    int count_step_rc = sqlite3_step(count_stmt);
+    if (count_step_rc != SQLITE_ROW) {
+        log_msg(stderr, "Failed to execute count statement rc:%d errMsg %s\n", count_step_rc, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(count_stmt);
+        return 1;
+    }
+
+    int total_count = sqlite3_column_int(count_stmt, 0);
+    *total = (total_count + page.page_size - 1) / page.page_size; // Calculate total pages
+
     // count results
     size_t count = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -734,10 +837,11 @@ static int fetch_anime_from_producer_id(unsigned int producer_id, pageable_t pag
     }
 
     sqlite3_finalize(stmt);
+    sqlite3_finalize(count_stmt);
     return 0;
 }
 
-static int fetch_anime_from_licensor_id(unsigned int licensor_id, pageable_t page, unsigned int* n, partial_anime_t** data) {
+static int fetch_anime_from_licensor_id(unsigned int licensor_id, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data) {
 
     sqlite3* connection = get_db();
     if (!connection) return 1;
@@ -778,6 +882,40 @@ static int fetch_anime_from_licensor_id(unsigned int licensor_id, pageable_t pag
         return 1;
     }
 
+    // Get total page count for client side pagination
+    sqlite3_stmt* count_stmt;
+    int count_prep_rc = sqlite3_prepare_v2(connection, SQL(
+        SELECT COUNT(*)
+        FROM anime_licensors al
+        JOIN anime a ON a.id = al.anime_id
+        WHERE al.licensor_id = ?
+    ), -1, &count_stmt, 0);
+
+    if (count_prep_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare count statement rc:%d errMsg %s\n", count_prep_rc, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int count_bind_rc = sqlite3_bind_int(count_stmt, 1, licensor_id);
+    if (count_bind_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind licensor id for count statement rc:%d errMsg %s\n", count_bind_rc, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(count_stmt);
+        return 1;
+    }
+
+    int count_step_rc = sqlite3_step(count_stmt);
+    if (count_step_rc != SQLITE_ROW) {
+        log_msg(stderr, "Failed to execute count statement rc:%d errMsg %s\n", count_step_rc, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(count_stmt);
+        return 1;
+    }
+
+    int total_count = sqlite3_column_int(count_stmt, 0);
+    *total = (total_count + page.page_size - 1) / page.page_size; // Calculate total pages
+
     // count results
     size_t count = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -800,10 +938,11 @@ static int fetch_anime_from_licensor_id(unsigned int licensor_id, pageable_t pag
     }
 
     sqlite3_finalize(stmt);
+    sqlite3_finalize(count_stmt);
     return 0;
 }
 
-API int fetch_studio_by_id(unsigned int id, studio_t *data, pageable_t page, unsigned int *n, partial_anime_t **anime) {
+API int fetch_studio_by_id(unsigned int id, studio_t *data, pageable_t page, unsigned int *n, unsigned int* total, partial_anime_t **anime) {
 
     sqlite3* connection = get_db();
     if (!connection) return 1;
@@ -844,10 +983,10 @@ API int fetch_studio_by_id(unsigned int id, studio_t *data, pageable_t page, uns
     sqlite3_finalize(stmt);
     
     // Get anime from studio
-    return fetch_anime_from_studio_id(id, page, n, anime);
+    return fetch_anime_from_studio_id(id, page, n, total, anime);
 }
 
-API int fetch_producer_by_id(unsigned int id, producer_t *data, pageable_t page, unsigned int *n, partial_anime_t **anime) {
+API int fetch_producer_by_id(unsigned int id, producer_t *data, pageable_t page, unsigned int *n, unsigned int* total, partial_anime_t **anime) {
 
     sqlite3* connection = get_db();
     if (!connection) return 1;
@@ -890,10 +1029,10 @@ API int fetch_producer_by_id(unsigned int id, producer_t *data, pageable_t page,
     sqlite3_finalize(stmt);
     
     // Get anime from producer
-    return fetch_anime_from_producer_id(id, page, n, anime);
+    return fetch_anime_from_producer_id(id, page, n, total, anime);
 }
 
-API int fetch_licensor_by_id(unsigned int id, licensor_t *data, pageable_t page, unsigned int *n, partial_anime_t **anime) {
+API int fetch_licensor_by_id(unsigned int id, licensor_t *data, pageable_t page, unsigned int *n, unsigned int* total, partial_anime_t **anime) {
 
     sqlite3* connection = get_db();
     if (!connection) return 1;
@@ -936,10 +1075,10 @@ API int fetch_licensor_by_id(unsigned int id, licensor_t *data, pageable_t page,
     sqlite3_finalize(stmt);
     
     // Get anime from licensor
-    return fetch_anime_from_licensor_id(id, page, n, anime);
+    return fetch_anime_from_licensor_id(id, page, n, total, anime);
 }
 
-API int fetch_anime_from_tag(unsigned int tag_id, pageable_t page, unsigned int *n, partial_anime_t **data) {
+API int fetch_anime_from_tag(unsigned int tag_id, pageable_t page, unsigned int *n, unsigned int* total, partial_anime_t **data) {
     sqlite3* connection = get_db();
     if (!connection) return 1;
     
@@ -979,6 +1118,40 @@ API int fetch_anime_from_tag(unsigned int tag_id, pageable_t page, unsigned int 
         return 1;
     }
 
+    // Get total page count for client side pagination
+    sqlite3_stmt* count_stmt;
+    int count_prep_rc = sqlite3_prepare_v2(connection, SQL(
+        SELECT COUNT(*)
+        FROM anime_tags at
+        JOIN anime a ON a.id = at.anime_id
+        WHERE at.tag_id = ?
+    ), -1, &count_stmt, 0);
+
+    if (count_prep_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare count statement rc:%d errMsg %s\n", count_prep_rc, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int count_bind_rc = sqlite3_bind_int(count_stmt, 1, tag_id);
+    if (count_bind_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind tag id for count statement rc:%d errMsg %s\n", count_bind_rc, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(count_stmt);
+        return 1;
+    }
+
+    int count_step_rc = sqlite3_step(count_stmt);
+    if (count_step_rc != SQLITE_ROW) {
+        log_msg(stderr, "Failed to execute count statement rc:%d errMsg %s\n", count_step_rc, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        sqlite3_finalize(count_stmt);
+        return 1;
+    }
+
+    int total_count = sqlite3_column_int(count_stmt, 0);
+    *total = (total_count + page.page_size - 1) / page.page_size; // Calculate total pages
+
     // count results
     size_t count = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -1001,6 +1174,7 @@ API int fetch_anime_from_tag(unsigned int tag_id, pageable_t page, unsigned int 
     }
 
     sqlite3_finalize(stmt);
+    sqlite3_finalize(count_stmt);
     return 0;
 }
 
