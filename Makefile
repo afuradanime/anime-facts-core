@@ -78,7 +78,7 @@ sqlite:
 	$(CC) $(CFLAGS) $(SQLITE_CFLAGS) -c sqlite3/sqlite3.c -o sqlite3/sqlite3.o
 
 clean:
-	-rm -f main.o $(SRC_DIR)/dynamic_array.o $(SRC_DIR)/anime.o $(SRC_DIR)/printer.o sqlite3/sqlite3.o benchmark/benchmark.o $(TARGET) $(TARGET_LIB) $(IMPORT_LIB) $(BENCHMARK_EXE) 2>/dev/null || del /Q main.o $(SRC_DIR)\dynamic_array.o $(SRC_DIR)\anime.o $(SRC_DIR)\printer.o sqlite3\sqlite3.o benchmark\benchmark.o $(TARGET) $(TARGET_LIB) $(IMPORT_LIB) $(BENCHMARK_EXE) 2>nul
+	-rm -f main.o $(SRC_DIR)/dynamic_array.o $(SRC_DIR)/anime.o $(SRC_DIR)/printer.o benchmark/benchmark.o $(TARGET) $(TARGET_LIB) $(IMPORT_LIB) $(BENCHMARK_EXE) 2>/dev/null || del /Q main.o $(SRC_DIR)\dynamic_array.o $(SRC_DIR)\anime.o $(SRC_DIR)\printer.o benchmark\benchmark.o $(TARGET) $(TARGET_LIB) $(IMPORT_LIB) $(BENCHMARK_EXE) 2>nul
 	@echo Cleaned build artifacts
 
 .PHONY: sqlite main link build build_lib run clean

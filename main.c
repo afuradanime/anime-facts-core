@@ -128,6 +128,30 @@ API void free_partial_anime_array(partial_anime_t* data, unsigned int n) {
     free(data);
 }
 
+
+API void free_studio(studio_t* studio) {
+    if (!studio) return;
+    if (studio->name) free(studio->name);
+    if (studio->url) free(studio->url);
+    memset(studio, 0, sizeof(studio_t));
+}
+
+API void free_producer(producer_t* producer) {
+    if (!producer) return;
+    if (producer->name) free(producer->name);
+    if (producer->type) free(producer->type);
+    if (producer->url) free(producer->url);
+    memset(producer, 0, sizeof(producer_t));
+}
+
+API void free_licensor(licensor_t* licensor) {
+    if (!licensor) return;
+    if (licensor->name) free(licensor->name);
+    if (licensor->type) free(licensor->type);
+    if (licensor->url) free(licensor->url);
+    memset(licensor, 0, sizeof(licensor_t));
+}
+
 API season_t current_season() {
 
     time_t now = time(NULL);
@@ -165,6 +189,56 @@ static unsigned char map_season_string(const char* season_str) {
     if (strcmp(season_str, "fall") == 0) return FALL;
     if (strcmp(season_str, "winter") == 0) return WINTER;
     return UNDEFINED;
+}
+
+// Helper function to count and parse the predictable pattern of anime queries
+static int parse_partial_anime_query(sqlite3_stmt* stmt, unsigned int* count, partial_anime_t** data) {
+    
+    // Allocate array
+    if (*count > 0) {
+        *data = (partial_anime_t*) calloc(*count, sizeof(partial_anime_t));
+        if (*data == NULL) {
+            log_msg(stderr, "Memory allocation failed\n");
+            sqlite3_finalize(stmt);
+            return 1;
+        }
+    }
+
+    // Populate array
+    size_t i = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW && i < *count) {
+        partial_anime_t* anime = &(*data)[i];
+        
+        const char* season_str = get_text_or_null(stmt, 11);
+
+        make_partial_anime(
+            anime,
+            sqlite3_column_int(stmt, 0),
+            get_text_or_null(stmt, 1),
+            get_text_or_null(stmt, 2),
+            (unsigned char)sqlite3_column_int(stmt, 3),
+            get_text_or_null(stmt, 4),
+            sqlite3_column_int(stmt, 5),
+            (unsigned char)sqlite3_column_int(stmt, 6),
+            sqlite3_column_int(stmt, 7) != 0,
+            get_text_or_null(stmt, 8),
+            get_text_or_null(stmt, 9),
+            get_text_or_null(stmt, 10),
+            map_season_string(season_str),
+            (unsigned short)sqlite3_column_int(stmt, 12),
+            get_text_or_null(stmt, 13),
+            get_text_or_null(stmt, 14),
+            get_text_or_null(stmt, 15),
+            get_text_or_null(stmt, 16),
+            get_text_or_null(stmt, 17),
+            get_text_or_null(stmt, 18),
+            get_text_or_null(stmt, 19)
+        );
+        
+        i++;
+    }
+
+    return 0;
 }
 
 static unsigned char map_tag_type(const char* type) {
@@ -227,58 +301,20 @@ API int fetch_anime_from_query(const char* name, pageable_t page, unsigned int* 
         count++;
     }
 
+    *n = (unsigned int) count;
+
     // Reset statement to beginning
     sqlite3_reset(stmt);
     sqlite3_bind_text(stmt, 1, pattern, -1, NULL);
     sqlite3_bind_int(stmt, 2, page.page_size);
     sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
 
-    // Allocate array
-    if (count > 0) {
-        *data = (partial_anime_t*) calloc(count, sizeof(partial_anime_t));
-        if (*data == NULL) {
-            log_msg(stderr, "Memory allocation failed\n");
-            sqlite3_finalize(stmt);
-            return 1;
-        }
+    int r_c = parse_partial_anime_query(stmt, n, data);
+    if (r_c != 0) {
+        log_msg(stderr, "Failed to parse anime from query\n");
+        sqlite3_finalize(stmt);
+        return 1;
     }
-
-    // populate array
-    size_t i = 0;
-    while (sqlite3_step(stmt) == SQLITE_ROW && i < count) {
-
-        partial_anime_t* anime = &(*data)[i];
-        
-        const char* season_str = get_text_or_null(stmt, 11);
-
-        make_partial_anime(
-            anime,
-            sqlite3_column_int(stmt, 0),
-            get_text_or_null(stmt, 1),
-            get_text_or_null(stmt, 2),
-            (unsigned char)sqlite3_column_int(stmt, 3),
-            get_text_or_null(stmt, 4),
-            sqlite3_column_int(stmt, 5),
-            (unsigned char)sqlite3_column_int(stmt, 6),
-            sqlite3_column_int(stmt, 7) != 0,
-            get_text_or_null(stmt, 8),
-            get_text_or_null(stmt, 9),
-            get_text_or_null(stmt, 10),
-            map_season_string(season_str),
-            (unsigned short)sqlite3_column_int(stmt, 12),
-            get_text_or_null(stmt, 13),
-            get_text_or_null(stmt, 14),
-            get_text_or_null(stmt, 15),
-            get_text_or_null(stmt, 16),
-            get_text_or_null(stmt, 17),
-            get_text_or_null(stmt, 18),
-            get_text_or_null(stmt, 19)
-        );
-        
-        i++;
-    }
-
-    *n = count;
 
     sqlite3_finalize(stmt);
     return 0;
@@ -551,56 +587,418 @@ API int fetch_anime_this_season(unsigned int* n, partial_anime_t** data) {
         count++;
     }
 
+    *n = (unsigned int) count;
+
     // Reset statement to beginning
     sqlite3_reset(stmt);
     sqlite3_bind_int(stmt, 1, cur_season.year);
     sqlite3_bind_text(stmt, 2, season_names[cur_season.season], -1, NULL);
 
-    // Allocate array
-    if (count > 0) {
-        *data = (partial_anime_t*) calloc(count, sizeof(partial_anime_t));
-        if (*data == NULL) {
-            log_msg(stderr, "Memory allocation failed\n");
-            sqlite3_finalize(stmt);
-            return 1;
-        }
+    int r_c = parse_partial_anime_query(stmt, n, data);
+    if (r_c != 0) {
+        log_msg(stderr, "Failed to parse anime this season query\n");
+        sqlite3_finalize(stmt);
+        return 1;
     }
 
-    // Populate array
-    size_t i = 0;
-    while (sqlite3_step(stmt) == SQLITE_ROW && i < count) {
-        partial_anime_t* anime = &(*data)[i];
-        
-        const char* season_str = get_text_or_null(stmt, 11);
+    sqlite3_finalize(stmt);
+    return 0;
+}
 
-        make_partial_anime(
-            anime,
-            sqlite3_column_int(stmt, 0),
-            get_text_or_null(stmt, 1),
-            get_text_or_null(stmt, 2),
-            (unsigned char)sqlite3_column_int(stmt, 3),
-            get_text_or_null(stmt, 4),
-            sqlite3_column_int(stmt, 5),
-            (unsigned char)sqlite3_column_int(stmt, 6),
-            sqlite3_column_int(stmt, 7) != 0,
-            get_text_or_null(stmt, 8),
-            get_text_or_null(stmt, 9),
-            get_text_or_null(stmt, 10),
-            map_season_string(season_str),
-            (unsigned short)sqlite3_column_int(stmt, 12),
-            get_text_or_null(stmt, 13),
-            get_text_or_null(stmt, 14),
-            get_text_or_null(stmt, 15),
-            get_text_or_null(stmt, 16),
-            get_text_or_null(stmt, 17),
-            get_text_or_null(stmt, 18),
-            get_text_or_null(stmt, 19)
-        );
-        
-        i++;
+static int fetch_anime_from_studio_id(unsigned int studio_id, pageable_t page, unsigned int* n, partial_anime_t** data) {
+
+    sqlite3* connection = get_db();
+    if (!connection) return 1;
+    
+    sqlite3_stmt* stmt;
+    int prep_rc = sqlite3_prepare_v2(connection, SQL(
+        SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url
+        FROM anime_studios _as
+        JOIN anime a ON a.id = _as.anime_id
+        WHERE _as.studio_id = ?
+        ORDER BY a.quality_score DESC, a.title ASC
+        LIMIT ? OFFSET ?
+    ), -1, &stmt, 0);
+
+    if (prep_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
+        return 1;
     }
 
-    *n = count;
+    int bind_rc1 = sqlite3_bind_int(stmt, 1, studio_id);
+    if (bind_rc1 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind studio id rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int bind_rc2 = sqlite3_bind_int(stmt, 2, page.page_size);
+    if (bind_rc2 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind page size filter rc:%d errMsg %s\n", bind_rc2, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int bind_rc3 = sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
+    if (bind_rc3 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind page number filter rc:%d errMsg %s\n", bind_rc3, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    // count results
+    size_t count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        count++;
+    }
+
+    *n = (unsigned int) count;
+
+    // Reset statement to beginning
+    sqlite3_reset(stmt);
+    sqlite3_bind_int(stmt, 1, studio_id);
+    sqlite3_bind_int(stmt, 2, page.page_size);
+    sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
+
+    int r_c = parse_partial_anime_query(stmt, n, data);
+    if (r_c != 0) {
+        log_msg(stderr, "Failed to parse anime from studio query\n");
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    sqlite3_finalize(stmt);
+    return 0;
+}
+
+static int fetch_anime_from_producer_id(unsigned int producer_id, pageable_t page, unsigned int* n, partial_anime_t** data) {
+
+    sqlite3* connection = get_db();
+    if (!connection) return 1;
+    
+    sqlite3_stmt* stmt;
+    int prep_rc = sqlite3_prepare_v2(connection, SQL(
+        SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url
+        FROM anime_producers ap
+        JOIN anime a ON a.id = ap.anime_id
+        WHERE ap.producer_id = ?
+        ORDER BY a.quality_score DESC, a.title ASC
+        LIMIT ? OFFSET ?
+    ), -1, &stmt, 0);
+
+    if (prep_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
+        return 1;
+    }
+
+    int bind_rc1 = sqlite3_bind_int(stmt, 1, producer_id);
+    if (bind_rc1 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind producer id rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int bind_rc2 = sqlite3_bind_int(stmt, 2, page.page_size);
+    if (bind_rc2 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind page size filter rc:%d errMsg %s\n", bind_rc2, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int bind_rc3 = sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
+    if (bind_rc3 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind page number filter rc:%d errMsg %s\n", bind_rc3, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    // count results
+    size_t count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        count++;
+    }
+
+    *n = (unsigned int) count;
+
+    // Reset statement to beginning
+    sqlite3_reset(stmt);
+    sqlite3_bind_int(stmt, 1, producer_id);
+    sqlite3_bind_int(stmt, 2, page.page_size);
+    sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
+
+    int r_c = parse_partial_anime_query(stmt, n, data);
+    if (r_c != 0) {
+        log_msg(stderr, "Failed to parse anime from producer query\n");
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    sqlite3_finalize(stmt);
+    return 0;
+}
+
+static int fetch_anime_from_licensor_id(unsigned int licensor_id, pageable_t page, unsigned int* n, partial_anime_t** data) {
+
+    sqlite3* connection = get_db();
+    if (!connection) return 1;
+    
+    sqlite3_stmt* stmt;
+    int prep_rc = sqlite3_prepare_v2(connection, SQL(
+        SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url
+        FROM anime_licensors al
+        JOIN anime a ON a.id = al.anime_id
+        WHERE al.licensor_id = ?
+        ORDER BY a.quality_score DESC, a.title ASC
+        LIMIT ? OFFSET ?
+    ), -1, &stmt, 0);
+
+    if (prep_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
+        return 1;
+    }
+
+    int bind_rc1 = sqlite3_bind_int(stmt, 1, licensor_id);
+    if (bind_rc1 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind licensor id rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int bind_rc2 = sqlite3_bind_int(stmt, 2, page.page_size);
+    if (bind_rc2 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind page size filter rc:%d errMsg %s\n", bind_rc2, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int bind_rc3 = sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
+    if (bind_rc3 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind page number filter rc:%d errMsg %s\n", bind_rc3, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    // count results
+    size_t count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        count++;
+    }
+
+    *n = (unsigned int) count;
+
+    // Reset statement to beginning
+    sqlite3_reset(stmt);
+    sqlite3_bind_int(stmt, 1, licensor_id);
+    sqlite3_bind_int(stmt, 2, page.page_size);
+    sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
+
+    int r_c = parse_partial_anime_query(stmt, n, data);
+    if (r_c != 0) {
+        log_msg(stderr, "Failed to parse anime from licensor query\n");
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    sqlite3_finalize(stmt);
+    return 0;
+}
+
+API int fetch_studio_by_id(unsigned int id, studio_t *data, pageable_t page, unsigned int *n, partial_anime_t **anime) {
+
+    sqlite3* connection = get_db();
+    if (!connection) return 1;
+    
+    // Get studio info
+    sqlite3_stmt* stmt;
+    int prep_rc = sqlite3_prepare_v2(connection, SQL(
+        SELECT id, name, url
+        FROM studios
+        WHERE id = ?
+    ), -1, &stmt, 0);
+
+    if (prep_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
+        return 1;
+    }
+
+    int bind_rc1 = sqlite3_bind_int(stmt, 1, id);
+    if (bind_rc1 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind id rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int step_rc = sqlite3_step(stmt);
+    if (step_rc != SQLITE_ROW) {
+        log_msg(stderr, "No studio found with id %u\n", id);
+        sqlite3_finalize(stmt);
+        return 1;  // Not found / error
+    }
+
+    data->id = sqlite3_column_int(stmt, 0);
+    const char* name = get_text_or_null(stmt, 1);
+    if (name) data->name = strdup(name);
+    const char* url = get_text_or_null(stmt, 2);
+    if (url) data->url = strdup(url);
+
+    sqlite3_finalize(stmt);
+    
+    // Get anime from studio
+    return fetch_anime_from_studio_id(id, page, n, anime);
+}
+
+API int fetch_producer_by_id(unsigned int id, producer_t *data, pageable_t page, unsigned int *n, partial_anime_t **anime) {
+
+    sqlite3* connection = get_db();
+    if (!connection) return 1;
+    
+    // Get producer info
+    sqlite3_stmt* stmt;
+    int prep_rc = sqlite3_prepare_v2(connection, SQL(
+        SELECT id, name, type, url
+        FROM producers
+        WHERE id = ?
+    ), -1, &stmt, 0);
+
+    if (prep_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
+        return 1;
+    }
+
+    int bind_rc1 = sqlite3_bind_int(stmt, 1, id);
+    if (bind_rc1 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind id rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int step_rc = sqlite3_step(stmt);
+    if (step_rc != SQLITE_ROW) {
+        log_msg(stderr, "No producer found with id %u\n", id);
+        sqlite3_finalize(stmt);
+        return 1;  // Not found / error
+    }
+
+    data->id = sqlite3_column_int(stmt, 0);
+    const char* name = get_text_or_null(stmt, 1);
+    if (name) data->name = strdup(name);
+    const char* type = get_text_or_null(stmt, 2);
+    if (type) data->type = strdup(type);
+    const char* url = get_text_or_null(stmt, 3);
+    if (url) data->url = strdup(url);
+
+    sqlite3_finalize(stmt);
+    
+    // Get anime from producer
+    return fetch_anime_from_producer_id(id, page, n, anime);
+}
+
+API int fetch_licensor_by_id(unsigned int id, licensor_t *data, pageable_t page, unsigned int *n, partial_anime_t **anime) {
+
+    sqlite3* connection = get_db();
+    if (!connection) return 1;
+    
+    // Get licensor info
+    sqlite3_stmt* stmt;
+    int prep_rc = sqlite3_prepare_v2(connection, SQL(
+        SELECT id, name, type, url
+        FROM licensors
+        WHERE id = ?
+    ), -1, &stmt, 0);
+
+    if (prep_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
+        return 1;
+    }
+
+    int bind_rc1 = sqlite3_bind_int(stmt, 1, id);
+    if (bind_rc1 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind id rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int step_rc = sqlite3_step(stmt);
+    if (step_rc != SQLITE_ROW) {
+        log_msg(stderr, "No licensor found with id %u\n", id);
+        sqlite3_finalize(stmt);
+        return 1;  // Not found / error
+    }
+
+    data->id = sqlite3_column_int(stmt, 0);
+    const char* name = get_text_or_null(stmt, 1);
+    if (name) data->name = strdup(name);
+    const char* type = get_text_or_null(stmt, 2);
+    if (type) data->type = strdup(type);
+    const char* url = get_text_or_null(stmt, 3);
+    if (url) data->url = strdup(url);
+
+    sqlite3_finalize(stmt);
+    
+    // Get anime from licensor
+    return fetch_anime_from_licensor_id(id, page, n, anime);
+}
+
+API int fetch_anime_from_tag(unsigned int tag_id, pageable_t page, unsigned int *n, partial_anime_t **data) {
+    sqlite3* connection = get_db();
+    if (!connection) return 1;
+    
+    sqlite3_stmt* stmt;
+    int prep_rc = sqlite3_prepare_v2(connection, SQL(
+        SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url
+        FROM anime_tags at
+        JOIN anime a ON a.id = at.anime_id
+        WHERE at.tag_id = ?
+        ORDER BY a.quality_score DESC, a.title ASC
+        LIMIT ? OFFSET ?
+    ), -1, &stmt, 0);
+
+    if (prep_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
+        return 1;
+    }
+
+    int bind_rc1 = sqlite3_bind_int(stmt, 1, tag_id);
+    if (bind_rc1 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind tag id rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int bind_rc2 = sqlite3_bind_int(stmt, 2, page.page_size);
+    if (bind_rc2 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind page size filter rc:%d errMsg %s\n", bind_rc2, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    int bind_rc3 = sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
+    if (bind_rc3 != SQLITE_OK) {
+        log_msg(stderr, "Failed to bind page number filter rc:%d errMsg %s\n", bind_rc3, sqlite3_errmsg(connection));
+        sqlite3_finalize(stmt);
+        return 1;
+    }
+
+    // count results
+    size_t count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        count++;
+    }
+
+    *n = (unsigned int) count;
+
+    // Reset statement to beginning
+    sqlite3_reset(stmt);
+    sqlite3_bind_int(stmt, 1, tag_id);
+    sqlite3_bind_int(stmt, 2, page.page_size);
+    sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
+
+    int r_c = parse_partial_anime_query(stmt, n, data);
+    if (r_c != 0) {
+        log_msg(stderr, "Failed to parse anime from tag query\n");
+        sqlite3_finalize(stmt);
+        return 1;
+    }
 
     sqlite3_finalize(stmt);
     return 0;
