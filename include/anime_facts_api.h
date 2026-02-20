@@ -16,9 +16,9 @@ API void close_db();
 
 // Anime interface
 API int fetch_anime_by_id(unsigned int id, anime_t* data);
-API int fetch_anime_this_season(pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data);
-API int fetch_anime_from_query(const char* name, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data);
-API int fetch_anime_from_tag(unsigned int tag_id, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data);
+API int fetch_anime_this_season(anime_filter_t filters, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data);
+API int fetch_anime_from_query(anime_filter_t filters, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data);
+API int fetch_anime_from_tag(unsigned int tag_id, anime_filter_t filters, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data);
 
 API void free_anime(anime_t* data);
 API void free_anime_array(anime_t* data, unsigned int n);
@@ -27,9 +27,9 @@ API void free_partial_anime(partial_anime_t* anime);
 API void free_partial_anime_array(partial_anime_t* data, unsigned int n);
 
 // Entity interface
-API int fetch_studio_by_id(unsigned int id, studio_t* data, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** anime);
-API int fetch_producer_by_id(unsigned int id, producer_t* data, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** anime);
-API int fetch_licensor_by_id(unsigned int id, licensor_t* data, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** anime);
+API int fetch_studio_by_id(unsigned int id, anime_filter_t filters, studio_t* data, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** anime);
+API int fetch_producer_by_id(unsigned int id, anime_filter_t filters, producer_t* data, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** anime);
+API int fetch_licensor_by_id(unsigned int id, anime_filter_t filters, licensor_t* data, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** anime);
 
 API void free_studio(studio_t* data);
 API void free_producer(producer_t* data);

@@ -249,98 +249,118 @@ static unsigned char map_tag_type(const char* type) {
     return TAG_EXPLICIT_GENRE;
 }
 
-API int fetch_anime_from_query(const char* name, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data) {
+// Helper functions for filter setting
+static int bind_anime_filters(sqlite3_stmt* stmt, anime_filter_t filters, int start_idx, const char* name_pattern) {
+    int i = start_idx;
+    if (filters.name && strlen(filters.name) > 0)
+        sqlite3_bind_text(stmt, i++, name_pattern, -1, NULL);
+    if (filters.type)
+        sqlite3_bind_int(stmt, i++, *filters.type);
+    if (filters.status)
+        sqlite3_bind_int(stmt, i++, *filters.status);
+    if (filters.start_date) {
+        char buf[16];
+        struct tm* t = localtime(filters.start_date);
+        strftime(buf, sizeof(buf), "%Y-%m-%d", t);
+        sqlite3_bind_text(stmt, i++, buf, -1, SQLITE_TRANSIENT);
+    }
+    if (filters.end_date) {
+        char buf[16];
+        struct tm* t = localtime(filters.end_date);
+        strftime(buf, sizeof(buf), "%Y-%m-%d", t);
+        sqlite3_bind_text(stmt, i++, buf, -1, SQLITE_TRANSIENT);
+    }
+    if (filters.season) {
+        sqlite3_bind_int(stmt, i++, filters.season->season);
+        sqlite3_bind_int(stmt, i++, filters.season->year);
+    }
+    if (filters.min_episodes)
+        sqlite3_bind_int(stmt, i++, *filters.min_episodes);
+    if (filters.max_episodes)
+        sqlite3_bind_int(stmt, i++, *filters.max_episodes);
+    return i; // next free index
+}
+
+static void build_filter_where(anime_filter_t filters, char* where, size_t size) {
+    strncpy(where, "WHERE 1=1", size); // Base to start appending, I don't want to check that shit
+    if (filters.name && strlen(filters.name) > 0)
+        strncat(where, " AND a.title LIKE ?", size - strlen(where) - 1);
+    if (filters.type)
+        strncat(where, " AND a.type_id = ?", size - strlen(where) - 1);
+    if (filters.status)
+        strncat(where, " AND a.status_id = ?", size - strlen(where) - 1);
+    if (filters.start_date)
+        strncat(where, " AND a.start_date >= ?", size - strlen(where) - 1);
+    if (filters.end_date)
+        strncat(where, " AND a.end_date <= ?", size - strlen(where) - 1);
+    if (filters.season)
+        strncat(where, " AND a.season = ? AND a.year = ?", size - strlen(where) - 1);
+    if (filters.min_episodes)
+        strncat(where, " AND a.episodes > ?", size - strlen(where) - 1);
+    if (filters.max_episodes)
+        strncat(where, " AND a.episodes < ?", size - strlen(where) - 1);
+}
+
+API int fetch_anime_from_query(anime_filter_t filters, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data) {
 
     sqlite3* connection = get_db();
     if (!connection) return 1;
-
     *n = 0;
     *data = NULL;
-    
-    sqlite3_stmt* stmt;
-    int prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url
-        FROM anime a
-        WHERE a.title LIKE ?
-        ORDER BY a.quality_score DESC, a.title ASC
-        LIMIT ? OFFSET ?
-    ), -1, &stmt, 0);
 
-    if (prep_rc != SQLITE_OK) {
-        log_msg(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
-        return 1;
-    }
+    char name_pattern[512] = "%";
+    if (filters.name && strlen(filters.name) > 0)
+        snprintf(name_pattern, sizeof(name_pattern), "%%%s%%", filters.name);
 
-    char pattern[512];
-    snprintf(pattern, sizeof(pattern), "%%%s%%", name);
+    char filter_where[1024];
+    build_filter_where(filters, filter_where, sizeof(filter_where));
 
-    int bind_rc1 = sqlite3_bind_text(stmt, 1, pattern, -1, NULL);
-    if (bind_rc1 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind name filter rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char main_sql[2048];
+    snprintf(main_sql, sizeof(main_sql),
+        "SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url "
+        "FROM anime a %s "
+        "ORDER BY a.quality_score DESC "
+        "LIMIT ? OFFSET ?", filter_where);
 
-    int bind_rc2 = sqlite3_bind_int(stmt, 2, page.page_size);
-    if (bind_rc2 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind page size filter rc:%d errMsg %s\n", bind_rc2, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char count_sql[1024];
+    snprintf(count_sql, sizeof(count_sql),
+        "SELECT COUNT(*) FROM anime a %s", filter_where);
 
-    int bind_rc3 = sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
-    if (bind_rc3 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind page number filter rc:%d errMsg %s\n", bind_rc3, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
-
-    // Get total page count for client side pagination
+    // Count
     sqlite3_stmt* count_stmt;
-    int count_prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT COUNT(*)
-        FROM anime a
-        WHERE a.title LIKE ?
-    ), -1, &count_stmt, 0);
-
-    if (count_prep_rc != SQLITE_OK) {
-        log_msg(stderr, "Failed to prepare count statement rc:%d errMsg %s\n", count_prep_rc, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
+    if (sqlite3_prepare_v2(connection, count_sql, -1, &count_stmt, 0) != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare count statement: %s\n", sqlite3_errmsg(connection));
         return 1;
     }
-
-    int count_bind_rc = sqlite3_bind_text(count_stmt, 1, pattern, -1, NULL);
-    if (count_bind_rc != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind name filter for count statement rc:%d errMsg %s\n", count_bind_rc, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
+    bind_anime_filters(count_stmt, filters, 1, name_pattern);
+    if (sqlite3_step(count_stmt) != SQLITE_ROW) {
+        log_msg(stderr, "Failed to execute count statement: %s\n", sqlite3_errmsg(connection));
         sqlite3_finalize(count_stmt);
         return 1;
     }
-
-    int count_step_rc = sqlite3_step(count_stmt);
-    if (count_step_rc != SQLITE_ROW) {
-        log_msg(stderr, "Failed to execute count statement rc:%d errMsg %s\n", count_step_rc, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        sqlite3_finalize(count_stmt);
-        return 1;
-    }
-
     int total_count = sqlite3_column_int(count_stmt, 0);
-    *total = (total_count + page.page_size - 1) / page.page_size; // Calculate total pages
+    *total = (total_count + page.page_size - 1) / page.page_size;
+    sqlite3_finalize(count_stmt);
 
-    // count results
-    size_t count = 0;
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        count++;
+    // Main
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(connection, main_sql, -1, &stmt, 0) != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(connection));
+        return 1;
     }
 
-    *n = (unsigned int) count;
+    int next = bind_anime_filters(stmt, filters, 1, name_pattern);
+    sqlite3_bind_int(stmt, next,     page.page_size);
+    sqlite3_bind_int(stmt, next + 1, page.page_number * page.page_size);
 
-    // Reset statement to beginning
+    size_t count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) count++;
+    *n = (unsigned int)count;
     sqlite3_reset(stmt);
-    sqlite3_bind_text(stmt, 1, pattern, -1, NULL);
-    sqlite3_bind_int(stmt, 2, page.page_size);
-    sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
+
+    next = bind_anime_filters(stmt, filters, 1, name_pattern);
+    sqlite3_bind_int(stmt, next,     page.page_size);
+    sqlite3_bind_int(stmt, next + 1, page.page_number * page.page_size);
 
     int r_c = parse_partial_anime_query(stmt, n, data);
     if (r_c != 0) {
@@ -350,7 +370,6 @@ API int fetch_anime_from_query(const char* name, pageable_t page, unsigned int* 
     }
 
     sqlite3_finalize(stmt);
-    sqlite3_finalize(count_stmt);
     return 0;
 }
 
@@ -579,428 +598,303 @@ API int fetch_anime_by_id(unsigned int id, anime_t* data) {
     return 0;
 }
 
-API int fetch_anime_this_season(pageable_t page, unsigned int *n, unsigned int *total, partial_anime_t **data) {
+API int fetch_anime_this_season(anime_filter_t filters, pageable_t page, unsigned int *n, unsigned int *total, partial_anime_t **data) {
     
+    // Check for filter validity
+    // Dnot search for seasons twice that'll always be nothing
+    if (filters.season)
+        return 1;
+
     sqlite3* connection = get_db();
     if (!connection) return 1;
-    
+
     *n = 0;
     *data = NULL;
-    
-    sqlite3_stmt* stmt;
-    int prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url
-        FROM anime a
-        WHERE a.year = ? AND a.season = ?
-        ORDER BY a.quality_score DESC, a.title ASC
-        LIMIT ? OFFSET ?
-    ), -1, &stmt, 0);
-
-    if (prep_rc != SQLITE_OK) {
-        log_msg(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
-        return 1;
-    }
 
     season_t cur_season = current_season();
 
-    int bind_rc1 = sqlite3_bind_int(stmt, 1, cur_season.year);
-    if (bind_rc1 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind year rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char name_pattern[512] = "%";
+    if (filters.name && strlen(filters.name) > 0)
+        snprintf(name_pattern, sizeof(name_pattern), "%%%s%%", filters.name);
 
-    int bind_rc2 = sqlite3_bind_text(stmt, 2, season_names[cur_season.season], -1, NULL);
-    if (bind_rc2 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind season rc:%d errMsg %s\n", bind_rc2, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char filter_where[1024];
+    build_filter_where(filters, filter_where, sizeof(filter_where));
 
-    int bind_rc3 = sqlite3_bind_int(stmt, 3, page.page_size);
-    if (bind_rc3 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind page size filter rc:%d errMsg %s\n", bind_rc3, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char main_sql[2048];
+    snprintf(main_sql, sizeof(main_sql),
+        "SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url "
+        "FROM anime a "
+        "WHERE a.year = ? AND a.season = ? %s "
+        "ORDER BY a.quality_score DESC "
+        "LIMIT ? OFFSET ?",
+        filter_where + strlen("WHERE 1=1")); // skip the "WHERE 1=1" prefix
 
-    int bind_rc4 = sqlite3_bind_int(stmt, 4, page.page_number * page.page_size);
-    if (bind_rc4 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind page number filter rc:%d errMsg %s\n", bind_rc4, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char count_sql[1024];
+    snprintf(count_sql, sizeof(count_sql),
+        "SELECT COUNT(*) FROM anime a "
+        "WHERE a.year = ? AND a.season = ? %s",
+        filter_where + strlen("WHERE 1=1"));
 
-    // Get total page count for client side pagination
+    // Count
     sqlite3_stmt* count_stmt;
-    int count_prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT COUNT(*)
-        FROM anime a
-        WHERE a.year = ? AND a.season = ?
-    ), -1, &count_stmt, 0);
-
-    if (count_prep_rc != SQLITE_OK) {
-        log_msg(stderr, "Failed to prepare count statement rc:%d errMsg %s\n", count_prep_rc, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
+    if (sqlite3_prepare_v2(connection, count_sql, -1, &count_stmt, 0) != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare count statement: %s\n", sqlite3_errmsg(connection));
         return 1;
     }
+    sqlite3_bind_int(count_stmt, 1, cur_season.year);
+    sqlite3_bind_text(count_stmt, 2, season_names[cur_season.season], -1, NULL);
+    bind_anime_filters(count_stmt, filters, 3, name_pattern);
 
-    int count_bind_rc1 = sqlite3_bind_int(count_stmt, 1, cur_season.year);
-    if (count_bind_rc1 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind year for count statement rc:%d errMsg %s\n", count_bind_rc1, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
+    if (sqlite3_step(count_stmt) != SQLITE_ROW) {
+        log_msg(stderr, "Failed to execute count: %s\n", sqlite3_errmsg(connection));
         sqlite3_finalize(count_stmt);
         return 1;
     }
-
-    int count_bind_rc2 = sqlite3_bind_text(count_stmt, 2, season_names[cur_season.season], -1, NULL);
-    if (count_bind_rc2 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind season for count statement rc:%d errMsg %s\n", count_bind_rc2, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        sqlite3_finalize(count_stmt);
-        return 1;
-    }
-
-    int count_step_rc = sqlite3_step(count_stmt);
-    if (count_step_rc != SQLITE_ROW) {
-        log_msg(stderr, "Failed to execute count statement rc:%d errMsg %s\n", count_step_rc, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        sqlite3_finalize(count_stmt);
-        return 1;
-    }
-
     int total_count = sqlite3_column_int(count_stmt, 0);
-    *total = (total_count + page.page_size - 1) / page.page_size; // Calculate total pages
+    *total = (total_count + page.page_size - 1) / page.page_size;
+    sqlite3_finalize(count_stmt);
 
-    // count results
-    size_t count = 0;
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        count++;
+    // Main query
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(connection, main_sql, -1, &stmt, 0) != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(connection));
+        return 1;
     }
-
-    *n = (unsigned int) count;
-
-    // Reset statement to beginning
-    sqlite3_reset(stmt);
     sqlite3_bind_int(stmt, 1, cur_season.year);
     sqlite3_bind_text(stmt, 2, season_names[cur_season.season], -1, NULL);
+    int next = bind_anime_filters(stmt, filters, 3, name_pattern);
+    sqlite3_bind_int(stmt, next,     page.page_size);
+    sqlite3_bind_int(stmt, next + 1, page.page_number * page.page_size);
+
+    size_t count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) count++;
+    *n = (unsigned int)count;
+    sqlite3_reset(stmt);
+
+    sqlite3_bind_int(stmt, 1, cur_season.year);
+    sqlite3_bind_text(stmt, 2, season_names[cur_season.season], -1, NULL);
+    next = bind_anime_filters(stmt, filters, 3, name_pattern);
+    sqlite3_bind_int(stmt, next,     page.page_size);
+    sqlite3_bind_int(stmt, next + 1, page.page_number * page.page_size);
 
     int r_c = parse_partial_anime_query(stmt, n, data);
-    if (r_c != 0) {
-        log_msg(stderr, "Failed to parse anime this season query\n");
-        sqlite3_finalize(stmt);
-        return 1;
-    }
-
     sqlite3_finalize(stmt);
-    sqlite3_finalize(count_stmt);
-    return 0;
+    return r_c;
 }
 
-static int fetch_anime_from_studio_id(unsigned int studio_id, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data) {
-
+static int fetch_anime_from_studio_id(unsigned int studio_id, anime_filter_t filters, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data) {
     sqlite3* connection = get_db();
     if (!connection) return 1;
-    
-    sqlite3_stmt* stmt;
-    int prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url
-        FROM anime_studios _as
-        JOIN anime a ON a.id = _as.anime_id
-        WHERE _as.studio_id = ?
-        ORDER BY a.quality_score DESC, a.title ASC
-        LIMIT ? OFFSET ?
-    ), -1, &stmt, 0);
 
-    if (prep_rc != SQLITE_OK) {
-        log_msg(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
-        return 1;
-    }
+    char name_pattern[512] = "%";
+    if (filters.name && strlen(filters.name) > 0)
+        snprintf(name_pattern, sizeof(name_pattern), "%%%s%%", filters.name);
 
-    int bind_rc1 = sqlite3_bind_int(stmt, 1, studio_id);
-    if (bind_rc1 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind studio id rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char filter_where[1024];
+    build_filter_where(filters, filter_where, sizeof(filter_where));
 
-    int bind_rc2 = sqlite3_bind_int(stmt, 2, page.page_size);
-    if (bind_rc2 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind page size filter rc:%d errMsg %s\n", bind_rc2, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char main_sql[2048];
+    snprintf(main_sql, sizeof(main_sql),
+        "SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url "
+        "FROM anime_studios _as "
+        "JOIN anime a ON a.id = _as.anime_id "
+        "WHERE _as.studio_id = ? %s "
+        "ORDER BY a.quality_score DESC "
+        "LIMIT ? OFFSET ?",
+        filter_where + strlen("WHERE 1=1"));
 
-    int bind_rc3 = sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
-    if (bind_rc3 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind page number filter rc:%d errMsg %s\n", bind_rc3, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char count_sql[1024];
+    snprintf(count_sql, sizeof(count_sql),
+        "SELECT COUNT(*) FROM anime_studios _as "
+        "JOIN anime a ON a.id = _as.anime_id "
+        "WHERE _as.studio_id = ? %s",
+        filter_where + strlen("WHERE 1=1"));
 
-    // Get total page count for client side pagination
+    // Count
     sqlite3_stmt* count_stmt;
-    int count_prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT COUNT(*)
-        FROM anime_studios _as
-        JOIN anime a ON a.id = _as.anime_id
-        WHERE _as.studio_id = ?
-    ), -1, &count_stmt, 0);
-
-    if (count_prep_rc != SQLITE_OK) {
-        log_msg(stderr, "Failed to prepare count statement rc:%d errMsg %s\n", count_prep_rc, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
+    if (sqlite3_prepare_v2(connection, count_sql, -1, &count_stmt, 0) != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare count statement: %s\n", sqlite3_errmsg(connection));
         return 1;
     }
-
-    int count_bind_rc = sqlite3_bind_int(count_stmt, 1, studio_id);
-    if (count_bind_rc != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind studio id for count statement rc:%d errMsg %s\n", count_bind_rc, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
+    sqlite3_bind_int(count_stmt, 1, studio_id);
+    bind_anime_filters(count_stmt, filters, 2, name_pattern);
+    if (sqlite3_step(count_stmt) != SQLITE_ROW) {
         sqlite3_finalize(count_stmt);
         return 1;
     }
-
-    int count_step_rc = sqlite3_step(count_stmt);
-    if (count_step_rc != SQLITE_ROW) {
-        log_msg(stderr, "Failed to execute count statement rc:%d errMsg %s\n", count_step_rc, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        sqlite3_finalize(count_stmt);
-        return 1;
-    }
-
     int total_count = sqlite3_column_int(count_stmt, 0);
-    *total = (total_count + page.page_size - 1) / page.page_size; // Calculate total pages
+    *total = (total_count + page.page_size - 1) / page.page_size;
+    sqlite3_finalize(count_stmt);
 
-    // count results
-    size_t count = 0;
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        count++;
+    // Main
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(connection, main_sql, -1, &stmt, 0) != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(connection));
+        return 1;
     }
-
-    *n = (unsigned int) count;
-
-    // Reset statement to beginning
-    sqlite3_reset(stmt);
     sqlite3_bind_int(stmt, 1, studio_id);
-    sqlite3_bind_int(stmt, 2, page.page_size);
-    sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
+    int next = bind_anime_filters(stmt, filters, 2, name_pattern);
+    sqlite3_bind_int(stmt, next,     page.page_size);
+    sqlite3_bind_int(stmt, next + 1, page.page_number * page.page_size);
+
+    size_t count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) count++;
+    *n = (unsigned int)count;
+    sqlite3_reset(stmt);
+
+    sqlite3_bind_int(stmt, 1, studio_id);
+    next = bind_anime_filters(stmt, filters, 2, name_pattern);
+    sqlite3_bind_int(stmt, next,     page.page_size);
+    sqlite3_bind_int(stmt, next + 1, page.page_number * page.page_size);
 
     int r_c = parse_partial_anime_query(stmt, n, data);
-    if (r_c != 0) {
-        log_msg(stderr, "Failed to parse anime from studio query\n");
-        sqlite3_finalize(stmt);
-        return 1;
-    }
-
     sqlite3_finalize(stmt);
-    sqlite3_finalize(count_stmt);
-    return 0;
+    return r_c;
 }
 
-static int fetch_anime_from_producer_id(unsigned int producer_id, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data) {
+static int fetch_anime_from_producer_id(unsigned int producer_id, anime_filter_t filters, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data) {
 
     sqlite3* connection = get_db();
     if (!connection) return 1;
-    
-    sqlite3_stmt* stmt;
-    int prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url
-        FROM anime_producers ap
-        JOIN anime a ON a.id = ap.anime_id
-        WHERE ap.producer_id = ?
-        ORDER BY a.quality_score DESC, a.title ASC
-        LIMIT ? OFFSET ?
-    ), -1, &stmt, 0);
 
-    if (prep_rc != SQLITE_OK) {
-        log_msg(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
-        return 1;
-    }
+    char name_pattern[512] = "%";
+    if (filters.name && strlen(filters.name) > 0)
+        snprintf(name_pattern, sizeof(name_pattern), "%%%s%%", filters.name);
 
-    int bind_rc1 = sqlite3_bind_int(stmt, 1, producer_id);
-    if (bind_rc1 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind producer id rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char filter_where[1024];
+    build_filter_where(filters, filter_where, sizeof(filter_where));
 
-    int bind_rc2 = sqlite3_bind_int(stmt, 2, page.page_size);
-    if (bind_rc2 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind page size filter rc:%d errMsg %s\n", bind_rc2, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char main_sql[2048];
+    snprintf(main_sql, sizeof(main_sql),
+        "SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url "
+        "FROM anime_producers ap "
+        "JOIN anime a ON a.id = ap.anime_id "
+        "WHERE ap.producer_id = ? %s "
+        "ORDER BY a.quality_score DESC "
+        "LIMIT ? OFFSET ?",
+        filter_where + strlen("WHERE 1=1"));
 
-    int bind_rc3 = sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
-    if (bind_rc3 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind page number filter rc:%d errMsg %s\n", bind_rc3, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char count_sql[1024];
+    snprintf(count_sql, sizeof(count_sql),
+        "SELECT COUNT(*) FROM anime_producers ap "
+        "JOIN anime a ON a.id = ap.anime_id "
+        "WHERE ap.producer_id = ? %s",
+        filter_where + strlen("WHERE 1=1"));
 
-    // Get total page count for client side pagination
+    // Count
     sqlite3_stmt* count_stmt;
-    int count_prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT COUNT(*)
-        FROM anime_producers ap
-        JOIN anime a ON a.id = ap.anime_id
-        WHERE ap.producer_id = ?
-    ), -1, &count_stmt, 0);
-
-    if (count_prep_rc != SQLITE_OK) {
-        log_msg(stderr, "Failed to prepare count statement rc:%d errMsg %s\n", count_prep_rc, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
+    if (sqlite3_prepare_v2(connection, count_sql, -1, &count_stmt, 0) != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare count statement: %s\n", sqlite3_errmsg(connection));
         return 1;
     }
-
-    int count_bind_rc = sqlite3_bind_int(count_stmt, 1, producer_id);
-    if (count_bind_rc != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind producer id for count statement rc:%d errMsg %s\n", count_bind_rc, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
+    sqlite3_bind_int(count_stmt, 1, producer_id);
+    bind_anime_filters(count_stmt, filters, 2, name_pattern);
+    if (sqlite3_step(count_stmt) != SQLITE_ROW) {
         sqlite3_finalize(count_stmt);
         return 1;
     }
-
-    int count_step_rc = sqlite3_step(count_stmt);
-    if (count_step_rc != SQLITE_ROW) {
-        log_msg(stderr, "Failed to execute count statement rc:%d errMsg %s\n", count_step_rc, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        sqlite3_finalize(count_stmt);
-        return 1;
-    }
-
     int total_count = sqlite3_column_int(count_stmt, 0);
-    *total = (total_count + page.page_size - 1) / page.page_size; // Calculate total pages
+    *total = (total_count + page.page_size - 1) / page.page_size;
+    sqlite3_finalize(count_stmt);
 
-    // count results
-    size_t count = 0;
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        count++;
+    // Main query
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(connection, main_sql, -1, &stmt, 0) != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(connection));
+        return 1;
     }
-
-    *n = (unsigned int) count;
-
-    // Reset statement to beginning
-    sqlite3_reset(stmt);
     sqlite3_bind_int(stmt, 1, producer_id);
-    sqlite3_bind_int(stmt, 2, page.page_size);
-    sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
+    int next = bind_anime_filters(stmt, filters, 2, name_pattern);
+    sqlite3_bind_int(stmt, next,     page.page_size);
+    sqlite3_bind_int(stmt, next + 1, page.page_number * page.page_size);
+
+    size_t count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) count++;
+    *n = (unsigned int)count;
+    sqlite3_reset(stmt);
+
+    sqlite3_bind_int(stmt, 1, producer_id);
+    next = bind_anime_filters(stmt, filters, 2, name_pattern);
+    sqlite3_bind_int(stmt, next,     page.page_size);
+    sqlite3_bind_int(stmt, next + 1, page.page_number * page.page_size);
 
     int r_c = parse_partial_anime_query(stmt, n, data);
-    if (r_c != 0) {
-        log_msg(stderr, "Failed to parse anime from producer query\n");
-        sqlite3_finalize(stmt);
-        return 1;
-    }
-
     sqlite3_finalize(stmt);
-    sqlite3_finalize(count_stmt);
-    return 0;
+    return r_c;
 }
 
-static int fetch_anime_from_licensor_id(unsigned int licensor_id, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data) {
+static int fetch_anime_from_licensor_id(unsigned int licensor_id, anime_filter_t filters, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data) {
 
     sqlite3* connection = get_db();
     if (!connection) return 1;
-    
-    sqlite3_stmt* stmt;
-    int prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url
-        FROM anime_licensors al
-        JOIN anime a ON a.id = al.anime_id
-        WHERE al.licensor_id = ?
-        ORDER BY a.quality_score DESC, a.title ASC
-        LIMIT ? OFFSET ?
-    ), -1, &stmt, 0);
 
-    if (prep_rc != SQLITE_OK) {
-        log_msg(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
-        return 1;
-    }
+    char name_pattern[512] = "%";
+    if (filters.name && strlen(filters.name) > 0)
+        snprintf(name_pattern, sizeof(name_pattern), "%%%s%%", filters.name);
 
-    int bind_rc1 = sqlite3_bind_int(stmt, 1, licensor_id);
-    if (bind_rc1 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind licensor id rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char filter_where[1024];
+    build_filter_where(filters, filter_where, sizeof(filter_where));
 
-    int bind_rc2 = sqlite3_bind_int(stmt, 2, page.page_size);
-    if (bind_rc2 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind page size filter rc:%d errMsg %s\n", bind_rc2, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char main_sql[2048];
+    snprintf(main_sql, sizeof(main_sql),
+        "SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url "
+        "FROM anime_licensors al "
+        "JOIN anime a ON a.id = al.anime_id "
+        "WHERE al.licensor_id = ? %s"
+        "ORDER BY a.quality_score DESC "
+        "LIMIT ? OFFSET ?",
+        filter_where + strlen("WHERE 1=1"));
 
-    int bind_rc3 = sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
-    if (bind_rc3 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind page number filter rc:%d errMsg %s\n", bind_rc3, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char count_sql[1024];
+    snprintf(count_sql, sizeof(count_sql),
+        "SELECT COUNT(*) FROM anime_licensors al "
+        "JOIN anime a ON a.id = al.anime_id "
+        "WHERE al.licensor_id = ? %s",
+        filter_where + strlen("WHERE 1=1"));
 
-    // Get total page count for client side pagination
+    // Count
     sqlite3_stmt* count_stmt;
-    int count_prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT COUNT(*)
-        FROM anime_licensors al
-        JOIN anime a ON a.id = al.anime_id
-        WHERE al.licensor_id = ?
-    ), -1, &count_stmt, 0);
-
-    if (count_prep_rc != SQLITE_OK) {
-        log_msg(stderr, "Failed to prepare count statement rc:%d errMsg %s\n", count_prep_rc, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
+    if (sqlite3_prepare_v2(connection, count_sql, -1, &count_stmt, 0) != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare count statement: %s\n", sqlite3_errmsg(connection));
         return 1;
     }
-
-    int count_bind_rc = sqlite3_bind_int(count_stmt, 1, licensor_id);
-    if (count_bind_rc != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind licensor id for count statement rc:%d errMsg %s\n", count_bind_rc, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
+    sqlite3_bind_int(count_stmt, 1, licensor_id);
+    bind_anime_filters(count_stmt, filters, 2, name_pattern);
+    if (sqlite3_step(count_stmt) != SQLITE_ROW) {
         sqlite3_finalize(count_stmt);
         return 1;
     }
-
-    int count_step_rc = sqlite3_step(count_stmt);
-    if (count_step_rc != SQLITE_ROW) {
-        log_msg(stderr, "Failed to execute count statement rc:%d errMsg %s\n", count_step_rc, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        sqlite3_finalize(count_stmt);
-        return 1;
-    }
-
     int total_count = sqlite3_column_int(count_stmt, 0);
-    *total = (total_count + page.page_size - 1) / page.page_size; // Calculate total pages
+    *total = (total_count + page.page_size - 1) / page.page_size;
+    sqlite3_finalize(count_stmt);
 
-    // count results
-    size_t count = 0;
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        count++;
+    // Main query
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(connection, main_sql, -1, &stmt, 0) != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(connection));
+        return 1;
     }
-
-    *n = (unsigned int) count;
-
-    // Reset statement to beginning
-    sqlite3_reset(stmt);
     sqlite3_bind_int(stmt, 1, licensor_id);
-    sqlite3_bind_int(stmt, 2, page.page_size);
-    sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
+    int next = bind_anime_filters(stmt, filters, 2, name_pattern);
+    sqlite3_bind_int(stmt, next,     page.page_size);
+    sqlite3_bind_int(stmt, next + 1, page.page_number * page.page_size);
+
+    size_t count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) count++;
+    *n = (unsigned int)count;
+    sqlite3_reset(stmt);
+
+    sqlite3_bind_int(stmt, 1, licensor_id);
+    next = bind_anime_filters(stmt, filters, 2, name_pattern);
+    sqlite3_bind_int(stmt, next,     page.page_size);
+    sqlite3_bind_int(stmt, next + 1, page.page_number * page.page_size);
 
     int r_c = parse_partial_anime_query(stmt, n, data);
-    if (r_c != 0) {
-        log_msg(stderr, "Failed to parse anime from licensor query\n");
-        sqlite3_finalize(stmt);
-        return 1;
-    }
-
     sqlite3_finalize(stmt);
-    sqlite3_finalize(count_stmt);
-    return 0;
+    return r_c;
 }
 
-API int fetch_studio_by_id(unsigned int id, studio_t *data, pageable_t page, unsigned int *n, unsigned int* total, partial_anime_t **anime) {
+API int fetch_studio_by_id(unsigned int id, anime_filter_t filters, studio_t *data, pageable_t page, unsigned int *n, unsigned int* total, partial_anime_t **anime) {
 
     sqlite3* connection = get_db();
     if (!connection) return 1;
@@ -1041,10 +935,10 @@ API int fetch_studio_by_id(unsigned int id, studio_t *data, pageable_t page, uns
     sqlite3_finalize(stmt);
     
     // Get anime from studio
-    return fetch_anime_from_studio_id(id, page, n, total, anime);
+    return fetch_anime_from_studio_id(id, filters, page, n, total, anime);
 }
 
-API int fetch_producer_by_id(unsigned int id, producer_t *data, pageable_t page, unsigned int *n, unsigned int* total, partial_anime_t **anime) {
+API int fetch_producer_by_id(unsigned int id, anime_filter_t filters, producer_t *data, pageable_t page, unsigned int *n, unsigned int* total, partial_anime_t **anime) {
 
     sqlite3* connection = get_db();
     if (!connection) return 1;
@@ -1087,10 +981,10 @@ API int fetch_producer_by_id(unsigned int id, producer_t *data, pageable_t page,
     sqlite3_finalize(stmt);
     
     // Get anime from producer
-    return fetch_anime_from_producer_id(id, page, n, total, anime);
+    return fetch_anime_from_producer_id(id, filters, page, n, total, anime);
 }
 
-API int fetch_licensor_by_id(unsigned int id, licensor_t *data, pageable_t page, unsigned int *n, unsigned int* total, partial_anime_t **anime) {
+API int fetch_licensor_by_id(unsigned int id, anime_filter_t filters, licensor_t *data, pageable_t page, unsigned int *n, unsigned int* total, partial_anime_t **anime) {
 
     sqlite3* connection = get_db();
     if (!connection) return 1;
@@ -1133,107 +1027,66 @@ API int fetch_licensor_by_id(unsigned int id, licensor_t *data, pageable_t page,
     sqlite3_finalize(stmt);
     
     // Get anime from licensor
-    return fetch_anime_from_licensor_id(id, page, n, total, anime);
+    return fetch_anime_from_licensor_id(id, filters, page, n, total, anime);
 }
 
-API int fetch_anime_from_tag(unsigned int tag_id, pageable_t page, unsigned int *n, unsigned int* total, partial_anime_t **data) {
+API int fetch_anime_from_tag(unsigned int tag_id, anime_filter_t filters, pageable_t page, unsigned int* n, unsigned int* total, partial_anime_t** data) {
     sqlite3* connection = get_db();
     if (!connection) return 1;
-    
-    sqlite3_stmt* stmt;
-    int prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url
-        FROM anime_tags at
-        JOIN anime a ON a.id = at.anime_id
-        WHERE at.tag_id = ?
-        ORDER BY a.quality_score DESC, a.title ASC
-        LIMIT ? OFFSET ?
-    ), -1, &stmt, 0);
 
-    if (prep_rc != SQLITE_OK) {
-        log_msg(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
-        return 1;
-    }
+    char name_pattern[512] = "%";
+    if (filters.name && strlen(filters.name) > 0)
+        snprintf(name_pattern, sizeof(name_pattern), "%%%s%%", filters.name);
 
-    int bind_rc1 = sqlite3_bind_int(stmt, 1, tag_id);
-    if (bind_rc1 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind tag id rc:%d errMsg %s\n", bind_rc1, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char filter_where[1105];
+    build_filter_where(filters, filter_where, sizeof(filter_where));
 
-    int bind_rc2 = sqlite3_bind_int(stmt, 2, page.page_size);
-    if (bind_rc2 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind page size filter rc:%d errMsg %s\n", bind_rc2, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char main_sql[2048];
+    snprintf(main_sql, sizeof(main_sql),
+        "SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url "
+        "FROM anime_tags at "
+        "JOIN anime a ON a.id = at.anime_id "
+        "WHERE at.tag_id = ? %s "
+        "ORDER BY a.quality_score DESC "
+        "LIMIT ? OFFSET ?",
+        filter_where + strlen("WHERE 1=1"));
 
-    int bind_rc3 = sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
-    if (bind_rc3 != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind page number filter rc:%d errMsg %s\n", bind_rc3, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
+    char count_sql[1106];
+    snprintf(count_sql, sizeof(count_sql),
+        "SELECT COUNT(*) FROM anime_tags at "
+        "JOIN anime a ON a.id = at.anime_id "
+        "WHERE at.tag_id = ? %s",
+        filter_where + strlen("WHERE 1=1"));
 
-    // Get total page count for client side pagination
     sqlite3_stmt* count_stmt;
-    int count_prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT COUNT(*)
-        FROM anime_tags at
-        JOIN anime a ON a.id = at.anime_id
-        WHERE at.tag_id = ?
-    ), -1, &count_stmt, 0);
-
-    if (count_prep_rc != SQLITE_OK) {
-        log_msg(stderr, "Failed to prepare count statement rc:%d errMsg %s\n", count_prep_rc, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        return 1;
-    }
-
-    int count_bind_rc = sqlite3_bind_int(count_stmt, 1, tag_id);
-    if (count_bind_rc != SQLITE_OK) {
-        log_msg(stderr, "Failed to bind tag id for count statement rc:%d errMsg %s\n", count_bind_rc, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        sqlite3_finalize(count_stmt);
-        return 1;
-    }
-
-    int count_step_rc = sqlite3_step(count_stmt);
-    if (count_step_rc != SQLITE_ROW) {
-        log_msg(stderr, "Failed to execute count statement rc:%d errMsg %s\n", count_step_rc, sqlite3_errmsg(connection));
-        sqlite3_finalize(stmt);
-        sqlite3_finalize(count_stmt);
-        return 1;
-    }
-
+    if (sqlite3_prepare_v2(connection, count_sql, -1, &count_stmt, 0) != SQLITE_OK) return 1;
+    sqlite3_bind_int(count_stmt, 1, tag_id);
+    bind_anime_filters(count_stmt, filters, 2, name_pattern);
+    if (sqlite3_step(count_stmt) != SQLITE_ROW) { sqlite3_finalize(count_stmt); return 1; }
     int total_count = sqlite3_column_int(count_stmt, 0);
-    *total = (total_count + page.page_size - 1) / page.page_size; // Calculate total pages
+    *total = (total_count + page.page_size - 1) / page.page_size;
+    sqlite3_finalize(count_stmt);
 
-    // count results
-    size_t count = 0;
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        count++;
-    }
-
-    *n = (unsigned int) count;
-
-    // Reset statement to beginning
-    sqlite3_reset(stmt);
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(connection, main_sql, -1, &stmt, 0) != SQLITE_OK) return 1;
     sqlite3_bind_int(stmt, 1, tag_id);
-    sqlite3_bind_int(stmt, 2, page.page_size);
-    sqlite3_bind_int(stmt, 3, page.page_number * page.page_size);
+    int next = bind_anime_filters(stmt, filters, 2, name_pattern);
+    sqlite3_bind_int(stmt, next,     page.page_size);
+    sqlite3_bind_int(stmt, next + 1, page.page_number * page.page_size);
+
+    size_t count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) count++;
+    *n = (unsigned int)count;
+    sqlite3_reset(stmt);
+
+    sqlite3_bind_int(stmt, 1, tag_id);
+    next = bind_anime_filters(stmt, filters, 2, name_pattern);
+    sqlite3_bind_int(stmt, next,     page.page_size);
+    sqlite3_bind_int(stmt, next + 1, page.page_number * page.page_size);
 
     int r_c = parse_partial_anime_query(stmt, n, data);
-    if (r_c != 0) {
-        log_msg(stderr, "Failed to parse anime from tag query\n");
-        sqlite3_finalize(stmt);
-        return 1;
-    }
-
     sqlite3_finalize(stmt);
-    sqlite3_finalize(count_stmt);
-    return 0;
+    return r_c;
 }
 
 #ifdef _WIN32

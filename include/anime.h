@@ -143,6 +143,23 @@ struct partial_anime {
 
 typedef struct partial_anime partial_anime_t;
 
+// Filter by certain anime fields
+// Everything is nullable
+struct anime_filter {
+    enum anime_type* type;
+    enum anime_status* status;
+
+    time_t* start_date;
+    time_t* end_date;
+    season_t* season;
+
+    char* name;                     // Name search
+    unsigned int* min_episodes;
+    unsigned int* max_episodes;
+};
+
+typedef struct anime_filter anime_filter_t;
+
 /**
  * @brief Create anime from database row data
  */
