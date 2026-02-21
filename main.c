@@ -586,6 +586,7 @@ API int fetch_anime_by_id(unsigned int id, anime_t* data) {
     );
 
     *data = map_partial_anime(&temp);
+    free_partial_anime(&temp); // This bitch was leaking because of strdups
 
     fetch_synonyms(connection, id, data);
     fetch_descriptions(connection, id, data);
@@ -651,6 +652,7 @@ API int fetch_random_anime(anime_t *data) {
     );
 
     *data = map_partial_anime(&temp);
+    free_partial_anime(&temp); // This bitch was leaking because of strdups
 
     fetch_synonyms(connection, id, data);
     fetch_descriptions(connection, id, data);
@@ -905,7 +907,7 @@ static int fetch_anime_from_licensor_id(unsigned int licensor_id, anime_filter_t
         "SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url "
         "FROM anime_licensors al "
         "JOIN anime a ON a.id = al.anime_id "
-        "WHERE al.licensor_id = ? %s"
+        "WHERE al.licensor_id = ? %s "
         "ORDER BY a.quality_score DESC "
         "LIMIT ? OFFSET ?",
         filter_where + strlen("WHERE 1=1"));
