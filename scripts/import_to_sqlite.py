@@ -213,6 +213,15 @@ def create_tables(conn: sqlite3.Connection) -> None:
     cursor.execute("CREATE INDEX idx_anime_tags_tag_id ON anime_tags(tag_id)")
     cursor.execute("CREATE INDEX idx_anime_tags_anime_id ON anime_tags(anime_id)")
     cursor.execute("CREATE INDEX idx_tags_type_name ON tags(type, name)")
+
+    cursor.execute("""
+        CREATE VIEW IF NOT EXISTS random_anime
+        AS
+            SELECT a.id, a.url, a.title, a.type_id, a.source, a.episodes, a.status_id, a.airing, a.duration, a.start_date, a.end_date, a.season, a.year, a.broadcast_day, a.broadcast_time, a.broadcast_timezone, a.image_url, a.small_image_url, a.large_image_url, a.trailer_embed_url
+            FROM anime a
+            ORDER BY RANDOM() 
+            LIMIT 1;
+    """)
     
     conn.commit()
     print("Database schema created")

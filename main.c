@@ -598,6 +598,71 @@ API int fetch_anime_by_id(unsigned int id, anime_t* data) {
     return 0;
 }
 
+API int fetch_random_anime(anime_t *data) {
+
+    sqlite3* connection = get_db();
+    if (!connection) return 1;
+
+    sqlite3_stmt* stmt;
+    int prep_rc = sqlite3_prepare_v2(connection, SQL(
+        SELECT * FROM random_anime
+    ), -1, &stmt, 0);
+
+    if (prep_rc != SQLITE_OK) {
+        log_msg(stderr, "Failed to prepare statement rc:%d errMsg %s\n", prep_rc, sqlite3_errmsg(connection));
+        return 1;
+    }
+
+    int step_rc = sqlite3_step(stmt);
+    if (step_rc != SQLITE_ROW) {
+        log_msg(stderr, "No random anime found with, this is probably a misconfiguration of the SQL view.");
+        sqlite3_finalize(stmt);
+        return 1;  // Not found / error
+    }
+
+    const char* season_str = get_text_or_null(stmt, 11);
+
+    partial_anime_t temp = {0};
+
+    unsigned int id = sqlite3_column_int(stmt, 0);
+
+    make_partial_anime(
+        &temp,
+        id,
+        get_text_or_null(stmt, 1),
+        get_text_or_null(stmt, 2),
+        (unsigned char)sqlite3_column_int(stmt, 3),
+        get_text_or_null(stmt, 4),
+        sqlite3_column_int(stmt, 5),
+        (unsigned char)sqlite3_column_int(stmt, 6),
+        sqlite3_column_int(stmt, 7) != 0,
+        get_text_or_null(stmt, 8),
+        get_text_or_null(stmt, 9),
+        get_text_or_null(stmt, 10),
+        map_season_string(season_str),
+        (unsigned short)sqlite3_column_int(stmt, 12),
+        get_text_or_null(stmt, 13),
+        get_text_or_null(stmt, 14),
+        get_text_or_null(stmt, 15),
+        get_text_or_null(stmt, 16),
+        get_text_or_null(stmt, 17),
+        get_text_or_null(stmt, 18),
+        get_text_or_null(stmt, 19)
+    );
+
+    *data = map_partial_anime(&temp);
+
+    fetch_synonyms(connection, id, data);
+    fetch_descriptions(connection, id, data);
+    fetch_producers(connection, id, data);
+    fetch_licensors(connection, id, data);
+    fetch_studios(connection, id, data);
+    fetch_tags(connection, id, data);
+
+    sqlite3_finalize(stmt);
+    return 0;
+}
+
 API int fetch_anime_this_season(anime_filter_t filters, pageable_t page, unsigned int *n, unsigned int *total, partial_anime_t **data) {
     
     // Check for filter validity
