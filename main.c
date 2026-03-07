@@ -68,7 +68,7 @@ API void set_database_path(const char* new_path) {
 
 API void free_anime(anime_t* anime) {
     if (!anime) return;
-    
+
     // Free strings
     if (anime->url) free(anime->url);
     if (anime->title) free(anime->title);

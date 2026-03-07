@@ -5,22 +5,20 @@ Este módulo C fornece uma _interface_ para pesquisar uma base de dados [SQLite]
 
 Para a informação completa dos dados suportados, é favor ler [o modelo lógico da base de dados](_docs/svg/l_model.svg) ou o [modelo físico](_docs/physical_model.sql) para aqueles mais técnicos.
 
-**Dependências**
+**Requisitos**
 1. **[SQLite3](https://sqlite.org/)** - SGBD utilizado
+1. **[CMake](https://cmake.org/)** - Sistema de build utilizado
 
 ## Como fazer build
-Para fazer build do projecto é preciso primeiro compilar o [código fonte do SQLite](https://github.com/sqlite/sqlite) para objecto, o _Makefile_ possiu um _target_ para tal. [^1] 
-```bash
-make sqlite
+Para fazer build do projecto é preciso primeiro criar uma pasta `build`, para depois executar o cmake de lá:
+```sh
+mkdir build ; cd build ; cmake ..
 ```
-
-[1] Nota: Esta compilação só é preciso ser feita uma vez.
-
-Dada a existência do `sqlite.o` o programa está pronto para ser _built_ como biblioteca partilhada. Para tal existe também um outro _target_:
-```bash
-make build_lib
+E depois é fazer build do biblioteca.
+```sh
+cmake --build .
 ```
-Que vai criar um ficheiro `anime_facts.dll`. 
+Que vai criar um ficheiro `anime_facts.dll`/`anime_facts.so` e uma biblioteca estática do sqlite. 
 Este ficheiro pode ser utilizado em qualquer projecto capaz de interagir com bibliotecas dinâmicas (C, C++, Go, ...) tudo o que ele precisa é de uma base de dados bem formada.
 ## Como utilizar o motor de pesquisa
 ```c
