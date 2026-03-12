@@ -23,7 +23,7 @@ static const char* anime_status_to_string(enum anime_status status) {
     }
 }
 
-static const char* season_to_string(enum meteorological_season s) {
+static const char* season_to_string(meteorological_season s) {
     switch (s) {
         case SPRING: return "Spring";
         case SUMMER: return "Summer";
@@ -33,20 +33,12 @@ static const char* season_to_string(enum meteorological_season s) {
     }
 }
 
-static const char* tag_type_to_string(enum tag_type t) {
+static const char* tag_type_to_string(tag_type_t t) {
     switch (t) {
         case TAG_GENRE: return "Genre";
         case TAG_THEME: return "Theme";
         case TAG_DEMOGRAPHIC: return "Demographic";
         case TAG_EXPLICIT_GENRE: return "Explicit";
-        default: return "Unknown";
-    }
-}
-
-static const char* language_to_string(enum language l) {
-    switch (l) {
-        case ENGLISH: return "English";
-        case PORTUGUESE: return "Portuguese";
         default: return "Unknown";
     }
 }
@@ -114,19 +106,13 @@ API void print_anime(const anime_t* a) {
     printf("\n-- Titles ----------------------------------------\n");
     print_string_array("Synonyms", &a->synonyms);
 
-    printf("\n-- Descriptions ----------------------------------\n");
-    for (size_t i = 0; i < a->descriptions.count; ++i) {
-        description_t* d = &a->descriptions.items[i];
-        printf("[%s]\n%s\n\n",
-               language_to_string(d->language),
-               d->description);
-    }
+    printf("\n-- Description ----------------------------------\n");
+    printf("%s\n\n", a->description);
 
     printf("\n-- Producers -------------------------------------\n");
     for (size_t i = 0; i < a->producers.count; ++i) {
         producer_t* p = &a->producers.items[i];
         printf("- %s", p->name);
-        if (p->type) printf(" (%s)", p->type);
         if (p->url)  printf(" | %s", p->url);
         printf("\n");
     }
@@ -135,7 +121,6 @@ API void print_anime(const anime_t* a) {
     for (size_t i = 0; i < a->licensors.count; ++i) {
         licensor_t* l = &a->licensors.items[i];
         printf("- %s", l->name);
-        if (l->type) printf(" (%s)", l->type);
         if (l->url)  printf(" | %s", l->url);
         printf("\n");
     }

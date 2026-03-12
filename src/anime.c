@@ -88,11 +88,11 @@ anime_t map_partial_anime(partial_anime_t* partial) {
     anime.trailer_embed_url = partial->trailer_embed_url ? strdup(partial->trailer_embed_url) : NULL;
     
     init_string_array(&anime.synonyms);
-    init_description_array(&anime.descriptions);
     init_tag_array(&anime.tags);
     init_producer_array(&anime.producers);
     init_licensor_array(&anime.licensors);
     init_studio_array(&anime.studios);
+    anime.description = NULL;
     
     return anime;
 }
@@ -102,19 +102,14 @@ void add_anime_synonym(anime_t* anime, const char* synonym) {
     push_string(&anime->synonyms, synonym);
 }
 
-void add_anime_description(anime_t* anime, unsigned char language, const char* description) {
-    if (!anime || !description) return;
-    push_description(&anime->descriptions, language, description);
+void add_anime_producer(anime_t* anime, unsigned int id, const char* name, const char* url) {
+    if (!anime || !name) return;
+    push_producer(&anime->producers, id, name, url);
 }
 
-void add_anime_producer(anime_t* anime, unsigned int id, const char* name, const char* type, const char* url) {
+void add_anime_licensor(anime_t* anime, unsigned int id, const char* name, const char* url) {
     if (!anime || !name) return;
-    push_producer(&anime->producers, id, name, type, url);
-}
-
-void add_anime_licensor(anime_t* anime, unsigned int id, const char* name, const char* type, const char* url) {
-    if (!anime || !name) return;
-    push_licensor(&anime->licensors, id, name, type, url);
+    push_licensor(&anime->licensors, id, name, url);
 }
 
 void add_anime_studio(anime_t* anime, unsigned int id, const char* name, const char* url) {

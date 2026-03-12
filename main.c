@@ -86,11 +86,13 @@ API void free_anime(anime_t* anime) {
     
     // Free arrays
     free_string_array(&anime->synonyms);
-    free_description_array(&anime->descriptions);
     free_tag_array(&anime->tags);
     free_producer_array(&anime->producers);
     free_licensor_array(&anime->licensors);
     free_studio_array(&anime->studios);
+    
+    if (anime->description)
+        free(anime->description);
     
     memset(anime, 0, sizeof(anime_t));
 }
@@ -139,7 +141,6 @@ API void free_studio(studio_t* studio) {
 API void free_producer(producer_t* producer) {
     if (!producer) return;
     if (producer->name) free(producer->name);
-    if (producer->type) free(producer->type);
     if (producer->url) free(producer->url);
     memset(producer, 0, sizeof(producer_t));
 }
@@ -147,7 +148,6 @@ API void free_producer(producer_t* producer) {
 API void free_licensor(licensor_t* licensor) {
     if (!licensor) return;
     if (licensor->name) free(licensor->name);
-    if (licensor->type) free(licensor->type);
     if (licensor->url) free(licensor->url);
     memset(licensor, 0, sizeof(licensor_t));
 }
@@ -161,7 +161,7 @@ API season_t current_season() {
     int day = t->tm_mday; // Current day
     int month = t->tm_mon + 1; // Current month
 
-    enum meteorological_season season;
+    meteorological_season season;
     
     // Spring: March 20 - June 20
     // Summer: June 21 - September 22
@@ -397,7 +397,7 @@ static int fetch_descriptions(sqlite3* db, unsigned int anime_id, anime_t* anime
     sqlite3_stmt* stmt;
 
     if (sqlite3_prepare_v2(db, SQL(
-        SELECT language_id, description
+        SELECT description
         FROM anime_descriptions
         WHERE anime_id = ?
     ), -1, &stmt, NULL) != SQLITE_OK)
@@ -406,11 +406,11 @@ static int fetch_descriptions(sqlite3* db, unsigned int anime_id, anime_t* anime
     sqlite3_bind_int(stmt, 1, anime_id);
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
-        unsigned char language = (unsigned char)sqlite3_column_int(stmt, 0);
-        const char* desc = get_text_or_null(stmt, 1);
+        const char* desc = get_text_or_null(stmt, 0);
 
         if (desc)
-            add_anime_description(anime, language, desc);
+            // add_anime_description(anime, language, desc);
+            anime->description = strdup(desc);
     }
 
     sqlite3_finalize(stmt);
@@ -421,7 +421,7 @@ static int fetch_producers(sqlite3* db, unsigned int anime_id, anime_t* anime) {
     sqlite3_stmt* stmt;
 
     if (sqlite3_prepare_v2(db, SQL(
-        SELECT p.id, p.name, p.type, p.url
+        SELECT p.id, p.name, p.url
         FROM anime_producers ap
         JOIN producers p ON p.id = ap.producer_id
         WHERE ap.anime_id = ?
@@ -435,8 +435,7 @@ static int fetch_producers(sqlite3* db, unsigned int anime_id, anime_t* anime) {
             anime,
             sqlite3_column_int(stmt, 0),
             get_text_or_null(stmt, 1),
-            get_text_or_null(stmt, 2),
-            get_text_or_null(stmt, 3)
+            get_text_or_null(stmt, 2)
         );
     }
 
@@ -448,7 +447,7 @@ static int fetch_licensors(sqlite3* db, unsigned int anime_id, anime_t* anime) {
     sqlite3_stmt* stmt;
 
     if (sqlite3_prepare_v2(db, SQL(
-        SELECT l.id, l.name, l.type, l.url
+        SELECT l.id, l.name, l.url
         FROM anime_licensors al
         JOIN licensors l ON l.id = al.licensor_id
         WHERE al.anime_id = ?
@@ -462,8 +461,7 @@ static int fetch_licensors(sqlite3* db, unsigned int anime_id, anime_t* anime) {
             anime,
             sqlite3_column_int(stmt, 0),
             get_text_or_null(stmt, 1),
-            get_text_or_null(stmt, 2),
-            get_text_or_null(stmt, 3)
+            get_text_or_null(stmt, 2)
         );
     }
 
@@ -1013,7 +1011,7 @@ API int fetch_producer_by_id(unsigned int id, anime_filter_t filters, producer_t
     // Get producer info
     sqlite3_stmt* stmt;
     int prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT id, name, type, url
+        SELECT id, name, url
         FROM producers
         WHERE id = ?
     ), -1, &stmt, 0);
@@ -1040,9 +1038,7 @@ API int fetch_producer_by_id(unsigned int id, anime_filter_t filters, producer_t
     data->id = sqlite3_column_int(stmt, 0);
     const char* name = get_text_or_null(stmt, 1);
     if (name) data->name = strdup(name);
-    const char* type = get_text_or_null(stmt, 2);
-    if (type) data->type = strdup(type);
-    const char* url = get_text_or_null(stmt, 3);
+    const char* url = get_text_or_null(stmt, 2);
     if (url) data->url = strdup(url);
 
     sqlite3_finalize(stmt);
@@ -1059,7 +1055,7 @@ API int fetch_licensor_by_id(unsigned int id, anime_filter_t filters, licensor_t
     // Get licensor info
     sqlite3_stmt* stmt;
     int prep_rc = sqlite3_prepare_v2(connection, SQL(
-        SELECT id, name, type, url
+        SELECT id, name, url
         FROM licensors
         WHERE id = ?
     ), -1, &stmt, 0);
@@ -1086,9 +1082,7 @@ API int fetch_licensor_by_id(unsigned int id, anime_filter_t filters, licensor_t
     data->id = sqlite3_column_int(stmt, 0);
     const char* name = get_text_or_null(stmt, 1);
     if (name) data->name = strdup(name);
-    const char* type = get_text_or_null(stmt, 2);
-    if (type) data->type = strdup(type);
-    const char* url = get_text_or_null(stmt, 3);
+    const char* url = get_text_or_null(stmt, 2);
     if (url) data->url = strdup(url);
 
     sqlite3_finalize(stmt);

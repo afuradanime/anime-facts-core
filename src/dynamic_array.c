@@ -67,7 +67,7 @@ void init_producer_array(producer_array_t* arr) {
     arr->capacity = 0;
 }
 
-void push_producer(producer_array_t* arr, unsigned int id, const char* name, const char* type, const char* url) {
+void push_producer(producer_array_t* arr, unsigned int id, const char* name, const char* url) {
     if (arr->count >= arr->capacity) {
         arr->capacity = arr->capacity == 0 ? 4 : arr->capacity * 2;
         arr->items = (producer_t*) realloc(arr->items, arr->capacity * sizeof(producer_t));
@@ -75,7 +75,6 @@ void push_producer(producer_array_t* arr, unsigned int id, const char* name, con
     arr->items[arr->count++] = (producer_t){
         .id = id,
         .name = strdup(name),
-        .type = type ? strdup(type) : NULL,
         .url = url ? strdup(url) : NULL
     };
 }
@@ -84,7 +83,6 @@ void free_producer_array(producer_array_t* arr) {
     if (arr->items) {
         for (size_t i = 0; i < arr->count; i++) {
             if (arr->items[i].name) free(arr->items[i].name);
-            if (arr->items[i].type) free(arr->items[i].type);
             if (arr->items[i].url) free(arr->items[i].url);
         }
         free(arr->items);
@@ -100,7 +98,7 @@ void init_licensor_array(licensor_array_t* arr) {
     arr->capacity = 0;
 }
 
-void push_licensor(licensor_array_t* arr, unsigned int id, const char* name, const char* type, const char* url) {
+void push_licensor(licensor_array_t* arr, unsigned int id, const char* name, const char* url) {
     if (arr->count >= arr->capacity) {
         arr->capacity = arr->capacity == 0 ? 4 : arr->capacity * 2;
         arr->items = (licensor_t*) realloc(arr->items, arr->capacity * sizeof(licensor_t));
@@ -108,7 +106,6 @@ void push_licensor(licensor_array_t* arr, unsigned int id, const char* name, con
     arr->items[arr->count++] = (licensor_t){
         .id = id,
         .name = strdup(name),
-        .type = type ? strdup(type) : NULL,
         .url = url ? strdup(url) : NULL
     };
 }
@@ -117,7 +114,6 @@ void free_licensor_array(licensor_array_t* arr) {
     if (arr->items) {
         for (size_t i = 0; i < arr->count; i++) {
             if (arr->items[i].name) free(arr->items[i].name);
-            if (arr->items[i].type) free(arr->items[i].type);
             if (arr->items[i].url) free(arr->items[i].url);
         }
         free(arr->items);
@@ -150,35 +146,6 @@ void free_studio_array(studio_array_t* arr) {
         for (size_t i = 0; i < arr->count; i++) {
             if (arr->items[i].name) free(arr->items[i].name);
             if (arr->items[i].url) free(arr->items[i].url);
-        }
-        free(arr->items);
-    }
-    arr->items = NULL;
-    arr->count = 0;
-    arr->capacity = 0;
-}
-
-void init_description_array(description_array_t* arr) {
-    arr->items = NULL;
-    arr->count = 0;
-    arr->capacity = 0;
-}
-
-void push_description(description_array_t* arr, unsigned char language, const char* description) {
-    if (arr->count >= arr->capacity) {
-        arr->capacity = arr->capacity == 0 ? 2 : arr->capacity * 2;
-        arr->items = (description_t*) realloc(arr->items, arr->capacity * sizeof(description_t));
-    }
-    arr->items[arr->count++] = (description_t){
-        .language = language,
-        .description = strdup(description)
-    };
-}
-
-void free_description_array(description_array_t* arr) {
-    if (arr->items) {
-        for (size_t i = 0; i < arr->count; i++) {
-            if (arr->items[i].description) free(arr->items[i].description);
         }
         free(arr->items);
     }

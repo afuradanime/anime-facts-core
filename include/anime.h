@@ -4,32 +4,26 @@
 #include "dynamic_array.h"
 #include <string.h>
 #include <stdbool.h>
+#include <time.h>
+
+typedef enum {
+    SPRING, SUMMER, FALL, WINTER, UNDEFINED
+}  meteorological_season;
 
 typedef struct season {
-    enum meteorological_season {
-        SPRING, SUMMER, FALL, WINTER, UNDEFINED
-    } season;
+    meteorological_season season;
     unsigned short year;
 } season_t;
-
-typedef struct description {
-    enum language {
-        ENGLISH = 1, PORTUGUESE = 2
-    } language;
-    char* description;
-} description_t;
 
 typedef struct producer {
     unsigned int id;
     char* name;
-    char* type;
     char* url;
 } producer_t;
 
 typedef struct licensor {
     unsigned int id;
     char* name;
-    char* type;
     char* url;
 } licensor_t;
 
@@ -39,15 +33,17 @@ typedef struct studio {
     char* url;
 } studio_t;
 
+typedef enum {
+    TAG_GENRE,
+    TAG_THEME,
+    TAG_DEMOGRAPHIC,
+    TAG_EXPLICIT_GENRE
+} tag_type_t;
+
 typedef struct tag {
     unsigned int id;
     char* name;
-    enum tag_type {
-        TAG_GENRE,
-        TAG_THEME,
-        TAG_DEMOGRAPHIC,
-        TAG_EXPLICIT_GENRE
-    } type;
+    tag_type_t type;
     char* url;
 } tag_t;
 
@@ -74,7 +70,7 @@ struct anime {
     char* title;            // Main title
     
     string_array_t synonyms;                        // Title variants (Japanese, English, Synonyms)
-    description_array_t descriptions;
+    char* description;
     
     enum anime_type type;
     
@@ -198,19 +194,14 @@ anime_t map_partial_anime(partial_anime_t* partial_anime);
 void add_anime_synonym(anime_t* anime, const char* synonym);
 
 /**
- * @brief Add a description in a specific language
- */
-void add_anime_description(anime_t* anime, unsigned char language, const char* description);
-
-/**
  * @brief Add a producer to anime
  */
-void add_anime_producer(anime_t* anime, unsigned int id, const char* name, const char* type, const char* url);
+void add_anime_producer(anime_t* anime, unsigned int id, const char* name, const char* url);
 
 /**
  * @brief Add a licensor to anime
  */
-void add_anime_licensor(anime_t* anime, unsigned int id, const char* name, const char* type, const char* url);
+void add_anime_licensor(anime_t* anime, unsigned int id, const char* name, const char* url);
 
 /**
  * @brief Add a studio to anime
